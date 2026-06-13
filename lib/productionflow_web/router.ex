@@ -80,6 +80,35 @@ defmodule ProductionflowWeb.Router do
     end
   end
 
+  # CRM / Relations. Read pages require crm.view; write pages require crm.manage.
+  scope "/relations", ProductionflowWeb.CRM, as: :crm do
+    pipe_through [:browser, :require_authenticated_user]
+
+    # Declared before the `/:id` show route below so the static `/new` segment
+    # is matched first (Phoenix matches routes in definition order).
+    live_session :crm_manage,
+      on_mount: [
+        {ProductionflowWeb.UserAuth, :require_authenticated},
+        {ProductionflowWeb.UserAuth, {:require_permission, "crm.manage"}}
+      ] do
+      live "/new", RelationLive.Form, :new
+      live "/:id/edit", RelationLive.Form, :edit
+      live "/:id/addresses/new", AddressLive.Form, :new
+      live "/:id/addresses/:address_id/edit", AddressLive.Form, :edit
+      live "/:id/contacts/new", ContactLive.Form, :new
+      live "/:id/contacts/:contact_id/edit", ContactLive.Form, :edit
+    end
+
+    live_session :crm,
+      on_mount: [
+        {ProductionflowWeb.UserAuth, :require_authenticated},
+        {ProductionflowWeb.UserAuth, {:require_permission, "crm.view"}}
+      ] do
+      live "/", RelationLive.Index, :index
+      live "/:id", RelationLive.Show, :show
+    end
+  end
+
   scope "/", ProductionflowWeb do
     pipe_through [:browser]
 

@@ -91,6 +91,13 @@ defmodule ProductionflowWeb.Layouts do
 
       <nav class="flex-1 space-y-1 px-3 py-2">
         <.nav_link navigate={~p"/"} icon="hero-home">{gettext("Dashboard")}</.nav_link>
+        <.nav_link
+          :if={Scope.can?(@current_scope, "crm.view")}
+          navigate={~p"/relations"}
+          icon="hero-identification"
+        >
+          {gettext("Relations")}
+        </.nav_link>
 
         <div
           :if={Scope.admin?(@current_scope)}

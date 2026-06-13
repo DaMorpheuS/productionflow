@@ -63,4 +63,24 @@ defmodule Productionflow.Accounts.Permissions do
 
   @doc "Returns true when `permission` is a known permission key."
   def valid?(permission), do: permission in @all
+
+  @doc """
+  Expands a list of permissions with the ones they imply.
+
+  A `"<area>.manage"` permission implies `"<area>.view"` — being able to manage
+  something always lets you see it. Used by `Productionflow.Accounts.Scope` so a
+  role only needs to be granted `manage` to also get `view`.
+  """
+  def expand(permissions) do
+    permissions
+    |> Enum.flat_map(fn perm -> [perm | implied_by(perm)] end)
+    |> Enum.uniq()
+  end
+
+  defp implied_by(permission) do
+    case String.split(permission, ".") do
+      [area, "manage"] -> Enum.filter(["#{area}.view"], &valid?/1)
+      _ -> []
+    end
+  end
 end

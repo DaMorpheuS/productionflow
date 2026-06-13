@@ -35,7 +35,9 @@ defmodule Productionflow.Accounts.Scope do
 
   def for_user(nil), do: nil
 
-  defp permissions_for(%User{role: %Role{permissions: permissions}}), do: MapSet.new(permissions)
+  defp permissions_for(%User{role: %Role{permissions: permissions}}),
+    do: MapSet.new(Productionflow.Accounts.Permissions.expand(permissions))
+
   defp permissions_for(_user), do: MapSet.new()
 
   @doc """
