@@ -230,6 +230,28 @@ defmodule ProductionflowWeb.UserAuth do
     end
   end
 
+  def on_mount({:require_permission, permission}, _params, session, socket) do
+    socket = mount_current_scope(socket, session)
+    scope = socket.assigns.current_scope
+
+    cond do
+      is_nil(scope) || is_nil(scope.user) ->
+        {:halt,
+         socket
+         |> Phoenix.LiveView.put_flash(:error, "You must log in to access this page.")
+         |> Phoenix.LiveView.redirect(to: ~p"/users/log-in")}
+
+      Scope.can?(scope, permission) ->
+        {:cont, socket}
+
+      true ->
+        {:halt,
+         socket
+         |> Phoenix.LiveView.put_flash(:error, "You are not authorized to access this page.")
+         |> Phoenix.LiveView.redirect(to: ~p"/")}
+    end
+  end
+
   def on_mount(:require_sudo_mode, _params, session, socket) do
     socket = mount_current_scope(socket, session)
 
@@ -284,4 +306,21 @@ defmodule ProductionflowWeb.UserAuth do
   end
 
   defp maybe_store_return_to(conn), do: conn
+
+  @doc """
+  Plug for controller routes that require a specific permission.
+
+  Assumes `require_authenticated_user` has already run (so a user is present).
+  Used as `plug :require_permission, "admin.users"`.
+  """
+  def require_permission(conn, permission) when is_binary(permission) do
+    if Scope.can?(conn.assigns[:current_scope], permission) do
+      conn
+    else
+      conn
+      |> put_flash(:error, "You are not authorized to access this page.")
+      |> redirect(to: ~p"/")
+      |> halt()
+    end
+  end
 end

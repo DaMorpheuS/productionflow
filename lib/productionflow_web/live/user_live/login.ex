@@ -13,13 +13,9 @@ defmodule ProductionflowWeb.UserLive.Login do
             <p>Log in</p>
             <:subtitle>
               <%= if @current_scope do %>
-                You need to reauthenticate to perform sensitive actions on your account.
+                {gettext("You need to reauthenticate to perform sensitive actions on your account.")}
               <% else %>
-                Don't have an account? <.link
-                  navigate={~p"/users/register"}
-                  class="font-semibold text-brand hover:underline"
-                  phx-no-format
-                >Sign up</.link> for an account now.
+                {gettext("Enter your account email to log in.")}
               <% end %>
             </:subtitle>
           </.header>

@@ -43,9 +43,13 @@ defmodule ProductionflowWeb.ConnCase do
 
   It stores an updated connection and a registered user in the
   test context.
+
+  Pass `@tag permissions: ["admin.roles"]` to assign the user a role granting
+  those permissions; defaults to no permissions.
   """
   def register_and_log_in_user(%{conn: conn} = context) do
-    user = Productionflow.AccountsFixtures.user_fixture()
+    permissions = Map.get(context, :permissions, [])
+    user = Productionflow.AccountsFixtures.user_fixture_with_permissions(permissions)
     scope = Productionflow.Accounts.Scope.for_user(user)
 
     opts =

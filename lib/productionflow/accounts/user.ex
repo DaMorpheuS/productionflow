@@ -8,6 +8,10 @@ defmodule Productionflow.Accounts.User do
     field :hashed_password, :string, redact: true
     field :confirmed_at, :utc_datetime
     field :authenticated_at, :utc_datetime, virtual: true
+    field :name, :string
+    field :active, :boolean, default: true
+
+    belongs_to :role, Productionflow.Accounts.Role
 
     timestamps(type: :utc_datetime)
   end
@@ -54,6 +58,40 @@ defmodule Productionflow.Accounts.User do
     else
       changeset
     end
+  end
+
+  @doc """
+  A changeset for an administrator creating a user.
+
+  Sets the email, profile fields, and role. The user is created unconfirmed and
+  without a password; they confirm and set a password by following the login
+  instructions sent to them.
+
+  Supports the same `:validate_unique` option as `email_changeset/3`.
+  """
+  def admin_create_changeset(user, attrs, opts \\ []) do
+    user
+    |> cast(attrs, [:email, :name, :active, :role_id])
+    |> validate_email(opts)
+    |> validate_role()
+  end
+
+  @doc """
+  A changeset for an administrator updating a user's profile and role.
+
+  Email changes are intentionally excluded — those go through the user's own
+  settings flow, which confirms the new address.
+  """
+  def admin_update_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:name, :active, :role_id])
+    |> validate_role()
+  end
+
+  defp validate_role(changeset) do
+    changeset
+    |> validate_required([:role_id])
+    |> assoc_constraint(:role)
   end
 
   @doc """

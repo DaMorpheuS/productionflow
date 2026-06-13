@@ -282,6 +282,50 @@ defmodule ProductionflowWeb.UserAuthTest do
     end
   end
 
+  describe "on_mount {:require_permission, permission}" do
+    test "continues when the user has the permission", %{conn: conn} do
+      user = Productionflow.AccountsFixtures.user_fixture_with_permissions(["admin.roles"])
+      user_token = Accounts.generate_user_session_token(user)
+      session = conn |> put_session(:user_token, user_token) |> get_session()
+
+      {:cont, updated_socket} =
+        UserAuth.on_mount({:require_permission, "admin.roles"}, %{}, session, %LiveView.Socket{})
+
+      assert updated_socket.assigns.current_scope.user.id == user.id
+    end
+
+    test "halts and redirects home when the user lacks the permission", %{conn: conn} do
+      user = Productionflow.AccountsFixtures.user_fixture_with_permissions(["crm.view"])
+      user_token = Accounts.generate_user_session_token(user)
+      session = conn |> put_session(:user_token, user_token) |> get_session()
+
+      socket = %LiveView.Socket{
+        endpoint: ProductionflowWeb.Endpoint,
+        assigns: %{__changed__: %{}, flash: %{}}
+      }
+
+      {:halt, updated_socket} =
+        UserAuth.on_mount({:require_permission, "admin.roles"}, %{}, session, socket)
+
+      assert updated_socket.assigns.flash["error"] ==
+               "You are not authorized to access this page."
+    end
+
+    test "halts and redirects to login when there is no user", %{conn: conn} do
+      session = get_session(conn)
+
+      socket = %LiveView.Socket{
+        endpoint: ProductionflowWeb.Endpoint,
+        assigns: %{__changed__: %{}, flash: %{}}
+      }
+
+      {:halt, updated_socket} =
+        UserAuth.on_mount({:require_permission, "admin.roles"}, %{}, session, socket)
+
+      assert updated_socket.assigns.flash["error"] == "You must log in to access this page."
+    end
+  end
+
   describe "on_mount :require_sudo_mode" do
     test "allows users that have authenticated in the last 10 minutes", %{conn: conn, user: user} do
       user_token = Accounts.generate_user_session_token(user)

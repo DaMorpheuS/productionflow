@@ -6,7 +6,7 @@ defmodule Productionflow.Accounts do
   import Ecto.Query, warn: false
   alias Productionflow.Repo
 
-  alias Productionflow.Accounts.{User, UserToken, UserNotifier}
+  alias Productionflow.Accounts.{User, UserToken, UserNotifier, Role}
 
   ## Database getters
 
@@ -185,7 +185,11 @@ defmodule Productionflow.Accounts do
   """
   def get_user_by_session_token(token) do
     {:ok, query} = UserToken.verify_session_token_query(token)
-    Repo.one(query)
+
+    case Repo.one(query) do
+      {%User{} = user, token_inserted_at} -> {Repo.preload(user, :role), token_inserted_at}
+      nil -> nil
+    end
   end
 
   @doc """
@@ -279,6 +283,92 @@ defmodule Productionflow.Accounts do
   def delete_user_session_token(token) do
     Repo.delete_all(from(UserToken, where: [token: ^token, context: "session"]))
     :ok
+  end
+
+  ## Roles
+
+  @doc "Returns all roles ordered by name."
+  def list_roles do
+    Role |> order_by(:name) |> Repo.all()
+  end
+
+  @doc "Gets a single role. Raises if it does not exist."
+  def get_role!(id), do: Repo.get!(Role, id)
+
+  @doc "Creates a role."
+  def create_role(attrs) do
+    %Role{}
+    |> Role.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  @doc "Updates a role."
+  def update_role(%Role{} = role, attrs) do
+    role
+    |> Role.changeset(attrs)
+    |> Repo.update()
+  end
+
+  @doc """
+  Deletes a role.
+
+  The `roles` -> `users.role_id` foreign key uses `on_delete: :restrict`, so a
+  role that is still assigned to a user cannot be deleted and returns a
+  changeset with a `:users` constraint error.
+  """
+  def delete_role(%Role{} = role) do
+    role
+    |> Ecto.Changeset.change()
+    |> Ecto.Changeset.foreign_key_constraint(:users,
+      name: "users_role_id_fkey",
+      message: "is still assigned to one or more users"
+    )
+    |> Repo.delete()
+  end
+
+  @doc "Returns a changeset for tracking role changes."
+  def change_role(%Role{} = role, attrs \\ %{}) do
+    Role.changeset(role, attrs)
+  end
+
+  ## Admin user management
+
+  @doc "Returns all users with their role preloaded, ordered by email."
+  def list_users do
+    User |> order_by(:email) |> preload(:role) |> Repo.all()
+  end
+
+  @doc "Gets a single user with its role preloaded. Raises if it does not exist."
+  def get_user_with_role!(id), do: User |> Repo.get!(id) |> Repo.preload(:role)
+
+  @doc """
+  Creates a user as an administrator.
+
+  The user is created unconfirmed and without a password. Deliver login
+  instructions afterwards with `deliver_login_instructions/2` so they can
+  confirm their account and set a password.
+  """
+  def create_user(attrs, opts \\ []) do
+    %User{}
+    |> User.admin_create_changeset(attrs, opts)
+    |> Repo.insert()
+  end
+
+  @doc "Updates a user's profile and role as an administrator."
+  def update_user(%User{} = user, attrs) do
+    user
+    |> User.admin_update_changeset(attrs)
+    |> Repo.update()
+  end
+
+  @doc "Returns a changeset for an administrator creating a user."
+  def change_user_creation(%User{} = user, attrs \\ %{}, opts \\ []) do
+    User.admin_create_changeset(user, attrs, opts)
+  end
+
+  @doc "Returns a changeset for an administrator updating a user."
+  def change_user_admin(%User{} = user, attrs \\ %{}) do
+    User.admin_update_changeset(user, attrs)
   end
 
   ## Token helper

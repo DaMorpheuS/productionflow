@@ -41,6 +41,27 @@ defmodule Productionflow.AccountsFixtures do
     user
   end
 
+  def unique_role_name, do: "role-#{System.unique_integer([:positive])}"
+
+  def role_fixture(attrs \\ %{}) do
+    {:ok, role} =
+      attrs
+      |> Enum.into(%{name: unique_role_name(), permissions: []})
+      |> Accounts.create_role()
+
+    role
+  end
+
+  @doc """
+  Creates a confirmed user assigned to a role granting the given permissions,
+  with the role preloaded.
+  """
+  def user_fixture_with_permissions(permissions) when is_list(permissions) do
+    role = role_fixture(%{permissions: permissions})
+    {:ok, user} = Accounts.update_user(user_fixture(), %{role_id: role.id})
+    Productionflow.Repo.preload(user, :role)
+  end
+
   def user_scope_fixture do
     user = user_fixture()
     user_scope_fixture(user)

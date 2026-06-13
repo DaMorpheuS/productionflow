@@ -5,6 +5,8 @@ defmodule ProductionflowWeb.Layouts do
   """
   use ProductionflowWeb, :html
 
+  alias Productionflow.Accounts.Scope
+
   # Embed all files in layouts/* within this module.
   # The default root.html.heex file contains the HTML
   # skeleton of your application, namely HTML headers
@@ -31,44 +33,103 @@ defmodule ProductionflowWeb.Layouts do
     default: nil,
     doc: "the current [scope](https://phoenix.hexdocs.pm/scopes.html)"
 
+  attr :page_title, :string, default: nil, doc: "the title shown in the page header"
+
   slot :inner_block, required: true
 
   def app(assigns) do
     ~H"""
-    <header class="navbar px-4 sm:px-6 lg:px-8">
-      <div class="flex-1">
-        <a href="/" class="flex-1 flex w-fit items-center gap-2">
-          <img src={~p"/images/logo.svg"} width="36" />
-          <span class="text-sm font-semibold">v{Application.spec(:phoenix, :vsn)}</span>
-        </a>
-      </div>
-      <div class="flex-none">
-        <ul class="flex flex-column px-1 space-x-4 items-center">
-          <li>
-            <a href="https://phoenixframework.org/" class="btn btn-ghost">Website</a>
-          </li>
-          <li>
-            <a href="https://github.com/phoenixframework/phoenix" class="btn btn-ghost">GitHub</a>
-          </li>
-          <li>
-            <.theme_toggle />
-          </li>
-          <li>
-            <a href="https://phoenix.hexdocs.pm/overview.html" class="btn btn-primary">
-              Get Started <span aria-hidden="true">&rarr;</span>
-            </a>
-          </li>
-        </ul>
-      </div>
-    </header>
+    <div class="flex min-h-screen bg-base-200">
+      <.sidebar current_scope={@current_scope} />
 
-    <main class="px-4 py-20 sm:px-6 lg:px-8">
-      <div class="mx-auto max-w-2xl space-y-4">
-        {render_slot(@inner_block)}
+      <div class="flex-1 flex flex-col min-w-0">
+        <header class="flex items-center justify-between gap-4 border-b border-base-300 bg-base-100 px-4 py-3 sm:px-6 lg:px-8">
+          <h1 class="text-lg font-semibold truncate">{@page_title || gettext("Productionflow")}</h1>
+          <div class="flex items-center gap-3">
+            <.theme_toggle />
+            <div :if={@current_scope} class="dropdown dropdown-end">
+              <div tabindex="0" role="button" class="btn btn-ghost btn-sm">
+                {@current_scope.user.email}
+                <.icon name="hero-chevron-down-micro" class="size-4" />
+              </div>
+              <ul
+                tabindex="0"
+                class="dropdown-content menu z-10 mt-2 w-48 rounded-box bg-base-100 p-2 shadow"
+              >
+                <li>
+                  <.link navigate={~p"/users/settings"}>{gettext("Settings")}</.link>
+                </li>
+                <li>
+                  <.link href={~p"/users/log-out"} method="delete">{gettext("Log out")}</.link>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </header>
+
+        <main class="flex-1 px-4 py-8 sm:px-6 lg:px-8">
+          <div class="mx-auto max-w-5xl space-y-6">
+            {render_slot(@inner_block)}
+          </div>
+        </main>
       </div>
-    </main>
+    </div>
 
     <.flash_group flash={@flash} />
+    """
+  end
+
+  attr :current_scope, :map, default: nil
+
+  defp sidebar(assigns) do
+    ~H"""
+    <aside class="hidden w-60 shrink-0 flex-col border-r border-base-300 bg-base-100 sm:flex">
+      <div class="flex items-center gap-2 px-5 py-4">
+        <img src={~p"/images/logo.svg"} width="32" alt="Productionflow" />
+        <span class="text-base font-semibold">Productionflow</span>
+      </div>
+
+      <nav class="flex-1 space-y-1 px-3 py-2">
+        <.nav_link navigate={~p"/"} icon="hero-home">{gettext("Dashboard")}</.nav_link>
+
+        <div
+          :if={Scope.admin?(@current_scope)}
+          class="px-3 pb-1 pt-4 text-xs font-semibold uppercase tracking-wide text-base-content/50"
+        >
+          {gettext("Administration")}
+        </div>
+        <.nav_link
+          :if={Scope.can?(@current_scope, "admin.users")}
+          navigate={~p"/admin/users"}
+          icon="hero-users"
+        >
+          {gettext("Users")}
+        </.nav_link>
+        <.nav_link
+          :if={Scope.can?(@current_scope, "admin.roles")}
+          navigate={~p"/admin/roles"}
+          icon="hero-shield-check"
+        >
+          {gettext("Roles")}
+        </.nav_link>
+      </nav>
+    </aside>
+    """
+  end
+
+  attr :navigate, :string, required: true
+  attr :icon, :string, required: true
+  slot :inner_block, required: true
+
+  defp nav_link(assigns) do
+    ~H"""
+    <.link
+      navigate={@navigate}
+      class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-base-content/80 hover:bg-base-200 hover:text-base-content"
+    >
+      <.icon name={@icon} class="size-5" />
+      {render_slot(@inner_block)}
+    </.link>
     """
   end
 
