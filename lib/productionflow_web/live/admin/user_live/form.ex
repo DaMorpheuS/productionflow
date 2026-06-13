@@ -36,6 +36,12 @@ defmodule ProductionflowWeb.Admin.UserLive.Form do
           required
         />
         <.input field={@form[:active]} type="checkbox" label={gettext("Active")} />
+        <.input
+          field={@form[:hourly_cost]}
+          type="number"
+          step="0.01"
+          label={gettext("Labour cost per hour (€)")}
+        />
 
         <div class="mt-6 flex items-center gap-3">
           <.button variant="primary" phx-disable-with={gettext("Saving...")}>

@@ -31,7 +31,7 @@ milestones**. Each milestone is fully tested and ends in its own commit.
 |---|-----------|--------|
 | M1 | Core foundation — auth, roles & permissions, admin UI, app shell | ✅ Done |
 | M2 | Relations (CRM-light) — relations, contacts, addresses, notes | ✅ Done |
-| M3 | Production resources — machines, configurable parameters, cost rates, time engine | ⬜ Planned |
+| M3 | Production resources — machines, time engine, internal-cost calculator | ✅ Done |
 | M4 | Materials & inventory — materials, stock movement ledger | ⬜ Planned |
 | M5 | Catalog & pricing — product templates (routes) + cost-based pricing engine | ⬜ Planned |
 | M6 | Orders — orders, lines, per-line production routes, lifecycle, stock consumption | ⬜ Planned |
@@ -68,6 +68,25 @@ milestones**. Each milestone is fully tested and ends in its own commit.
   newest-first.
 - Searchable, filterable relation list (by type, with an archived toggle), all
   gated by `crm.view` / `crm.manage` permissions.
+
+### M3 — Production resources
+
+- **Machines** with a generic time model that works for any kind of production:
+  time = setup + (quantity ÷ units-per-hour), against each machine's own output
+  unit (pieces, metres, m², kg, …).
+- **Time modifiers** per machine — named additions (a percentage or a fixed
+  number of minutes, e.g. "complex shape +20%") you switch on for a job when it
+  needs more time.
+- **Internal-cost engine**: the machine's cost per hour is derived from its
+  write-off (purchase − residual ÷ lifetime) plus yearly maintenance over its
+  productive hours; labour is the sum of the assigned operators' hourly cost
+  (operators are users, each with an hourly cost); energy is power draw × the
+  organization energy price.
+- **Live cost helper**: as you fill in a machine's cost basis, the form shows its
+  internal cost per hour update in real time.
+- **Estimate widget**: on a machine you enter a quantity, tick any modifiers, and
+  immediately see the duration and the machine / labour / energy / total internal
+  cost — all gated by `production.view` / `production.manage`.
 
 ---
 

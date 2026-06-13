@@ -98,6 +98,13 @@ defmodule ProductionflowWeb.Layouts do
         >
           {gettext("Relations")}
         </.nav_link>
+        <.nav_link
+          :if={Scope.can?(@current_scope, "production.view")}
+          navigate={~p"/production/machines"}
+          icon="hero-cog-6-tooth"
+        >
+          {gettext("Machines")}
+        </.nav_link>
 
         <div
           :if={Scope.admin?(@current_scope)}

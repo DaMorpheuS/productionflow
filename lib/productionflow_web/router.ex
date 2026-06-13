@@ -109,6 +109,32 @@ defmodule ProductionflowWeb.Router do
     end
   end
 
+  # Production resources. Read pages require production.view; write pages require
+  # production.manage. Manage session declared first so static routes
+  # (/machines/new, /settings) win over /machines/:id.
+  scope "/production", ProductionflowWeb.Production, as: :production do
+    pipe_through [:browser, :require_authenticated_user]
+
+    live_session :production_manage,
+      on_mount: [
+        {ProductionflowWeb.UserAuth, :require_authenticated},
+        {ProductionflowWeb.UserAuth, {:require_permission, "production.manage"}}
+      ] do
+      live "/machines/new", MachineLive.Form, :new
+      live "/machines/:id/edit", MachineLive.Form, :edit
+      live "/settings", ProductionSettingsLive, :edit
+    end
+
+    live_session :production,
+      on_mount: [
+        {ProductionflowWeb.UserAuth, :require_authenticated},
+        {ProductionflowWeb.UserAuth, {:require_permission, "production.view"}}
+      ] do
+      live "/machines", MachineLive.Index, :index
+      live "/machines/:id", MachineLive.Show, :show
+    end
+  end
+
   scope "/", ProductionflowWeb do
     pipe_through [:browser]
 

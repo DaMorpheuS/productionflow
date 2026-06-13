@@ -82,5 +82,17 @@ defmodule ProductionflowWeb.Admin.UserLiveTest do
       assert updated.active == false
       assert updated.role_id == new_role.id
     end
+
+    @tag permissions: ["admin.users"]
+    test "sets a user's hourly labour cost", %{conn: conn} do
+      target = user_fixture_with_permissions(["crm.view"])
+      {:ok, lv, _html} = live(conn, ~p"/admin/users/#{target}/edit")
+
+      lv
+      |> form("#user-form", user: %{role_id: target.role_id, hourly_cost: "42.50"})
+      |> render_submit()
+
+      assert Decimal.equal?(Accounts.get_user!(target.id).hourly_cost, Decimal.new("42.50"))
+    end
   end
 end

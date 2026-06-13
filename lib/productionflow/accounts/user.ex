@@ -10,6 +10,7 @@ defmodule Productionflow.Accounts.User do
     field :authenticated_at, :utc_datetime, virtual: true
     field :name, :string
     field :active, :boolean, default: true
+    field :hourly_cost, :decimal, default: Decimal.new(0)
 
     belongs_to :role, Productionflow.Accounts.Role
 
@@ -71,9 +72,10 @@ defmodule Productionflow.Accounts.User do
   """
   def admin_create_changeset(user, attrs, opts \\ []) do
     user
-    |> cast(attrs, [:email, :name, :active, :role_id])
+    |> cast(attrs, [:email, :name, :active, :role_id, :hourly_cost])
     |> validate_email(opts)
     |> validate_role()
+    |> validate_number(:hourly_cost, greater_than_or_equal_to: 0)
   end
 
   @doc """
@@ -84,8 +86,9 @@ defmodule Productionflow.Accounts.User do
   """
   def admin_update_changeset(user, attrs) do
     user
-    |> cast(attrs, [:name, :active, :role_id])
+    |> cast(attrs, [:name, :active, :role_id, :hourly_cost])
     |> validate_role()
+    |> validate_number(:hourly_cost, greater_than_or_equal_to: 0)
   end
 
   defp validate_role(changeset) do

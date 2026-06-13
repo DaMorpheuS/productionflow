@@ -86,6 +86,8 @@ defmodule ProductionflowWeb do
       import Phoenix.HTML
       # Core UI components
       import ProductionflowWeb.CoreComponents
+      # Display formatters (money, durations)
+      import ProductionflowWeb.Formats
 
       # Common modules used in templates
       alias Phoenix.LiveView.JS
