@@ -7,6 +7,19 @@
 # General application configuration
 import Config
 
+config :productionflow, :scopes,
+  user: [
+    default: true,
+    module: Productionflow.Accounts.Scope,
+    assign_key: :current_scope,
+    access_path: [:user, :id],
+    schema_key: :user_id,
+    schema_type: :id,
+    schema_table: :users,
+    test_data_fixture: Productionflow.AccountsFixtures,
+    test_setup_helper: :register_and_log_in_user
+  ]
+
 config :productionflow,
   ecto_repos: [Productionflow.Repo],
   generators: [timestamp_type: :utc_datetime]
