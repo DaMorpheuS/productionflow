@@ -195,6 +195,26 @@ defmodule ProductionflowWeb.Router do
     end
   end
 
+  scope "/pricing", ProductionflowWeb.Pricing, as: :pricing do
+    pipe_through [:browser, :require_authenticated_user]
+
+    live_session :pricing_manage,
+      on_mount: [
+        {ProductionflowWeb.UserAuth, :require_authenticated},
+        {ProductionflowWeb.UserAuth, {:require_permission, "pricing.manage"}}
+      ] do
+      live "/settings", PricingSettingsLive, :edit
+    end
+
+    live_session :pricing,
+      on_mount: [
+        {ProductionflowWeb.UserAuth, :require_authenticated},
+        {ProductionflowWeb.UserAuth, {:require_permission, "pricing.view"}}
+      ] do
+      live "/quote", QuoteLive, :index
+    end
+  end
+
   scope "/", ProductionflowWeb do
     pipe_through [:browser]
 

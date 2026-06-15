@@ -7,6 +7,7 @@ defmodule Productionflow.Catalog.ProductTemplate do
     field :sku, :string
     field :output_unit, :string
     field :description, :string
+    field :margin_pct, :decimal
     field :archived_at, :utc_datetime
 
     has_many :route_steps, Productionflow.Catalog.RouteStep,
@@ -20,9 +21,10 @@ defmodule Productionflow.Catalog.ProductTemplate do
   @doc false
   def changeset(product_template, attrs) do
     product_template
-    |> cast(attrs, [:name, :sku, :output_unit, :description])
+    |> cast(attrs, [:name, :sku, :output_unit, :description, :margin_pct])
     |> validate_required([:name, :output_unit])
     |> validate_length(:name, max: 160)
+    |> validate_number(:margin_pct, greater_than_or_equal_to: 0)
     |> update_change(:sku, &blank_to_nil/1)
     |> unique_constraint(:sku, name: :product_templates_sku_index)
   end

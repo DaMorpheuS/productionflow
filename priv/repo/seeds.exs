@@ -21,6 +21,8 @@ alias Productionflow.Production
 alias Productionflow.Production.Machine
 alias Productionflow.Catalog
 alias Productionflow.Catalog.ProductTemplate
+alias Productionflow.Pricing
+alias Productionflow.Pricing.PriceListItem
 
 # Idempotent: an Administrator role holding every permission, and an admin user
 # assigned to it. Re-running keeps both in sync.
@@ -355,7 +357,16 @@ materials = [
 ]
 
 # Remove the demo product template first (cascades its bill of materials) so the
-# materials it references can be replaced below despite the :restrict FK.
+# materials it references can be replaced below despite the :restrict FK. Its
+# price tiers also reference it via a :restrict FK, so clear those first.
+Repo.delete_all(
+  from(i in PriceListItem,
+    join: t in ProductTemplate,
+    on: t.id == i.product_template_id,
+    where: t.sku == "PRD-FLY-A5"
+  )
+)
+
 Repo.delete_all(from(t in ProductTemplate, where: t.sku == "PRD-FLY-A5"))
 
 # Remove any previously seeded demo materials (old and current SKUs), cascading
@@ -451,3 +462,20 @@ for {sku, qty_per_unit, waste} <- [{"PAP-90-OFF", "0.25", "3"}, {"INK-ECO-K", "0
 end
 
 IO.puts("Catalog seed: ensured demo machine \"#{press.name}\" and product \"#{flyer.name}\".")
+
+# Demo pricing: a default margin plus general volume tiers for the flyer, so the
+# quote view resolves a graduated price. The flyer's old tiers were cleared above
+# with its template, so we just add the current general tiers here.
+{:ok, _} = Pricing.update_settings(%{default_margin_pct: "35"})
+
+for {min_qty, price} <- [{"1", "0.18"}, {"1000", "0.12"}, {"5000", "0.08"}] do
+  {:ok, _} =
+    Pricing.add_template_price_tier(flyer, %{
+      "scope_relation_id" => "",
+      "min_quantity" => min_qty,
+      "kind" => "fixed_price",
+      "unit_price" => price
+    })
+end
+
+IO.puts("Pricing seed: set default margin and ensured general volume tiers for the flyer.")

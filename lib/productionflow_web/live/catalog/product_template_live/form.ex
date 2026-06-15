@@ -20,6 +20,13 @@ defmodule ProductionflowWeb.Catalog.ProductTemplateLive.Form do
             required
           />
           <.input field={@form[:sku]} type="text" label={gettext("SKU")} />
+          <.input
+            field={@form[:margin_pct]}
+            type="number"
+            step="0.01"
+            min="0"
+            label={gettext("Margin % (overrides default)")}
+          />
         </div>
         <.input field={@form[:description]} type="textarea" label={gettext("Description")} />
 

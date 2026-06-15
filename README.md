@@ -34,7 +34,7 @@ milestones**. Each milestone is fully tested and ends in its own commit.
 | M3 | Production resources — machines, time engine, internal-cost calculator | ✅ Done |
 | M4 | Materials & inventory — materials, categories, stock movement ledger | ✅ Done |
 | M5a | Catalog — product templates (production route + bill of materials) + cost/time preview | ✅ Done |
-| M5b | Pricing — customer price (margin) + price lists + quote view | ⬜ Planned |
+| M5b | Pricing — customer price (margin) + price lists + quote view | ✅ Done |
 | M6 | Orders — orders, lines, per-line production routes, lifecycle, stock consumption | ⬜ Planned |
 | M7 | Hardening & dashboard — overview, search, demo data | ⬜ Planned |
 
@@ -131,6 +131,28 @@ milestones**. Each milestone is fully tested and ends in its own commit.
   and price lists comes next, in M5b.)
 - Gated by `catalog.view` / `catalog.manage`. Referenced machines and materials
   are protected from deletion so a recipe can't be silently broken.
+
+### M5b — Pricing
+
+- **Default margin** turns internal cost into a sales price as a **markup on
+  cost** (`price = cost × (1 + margin%)`). A global default lives in pricing
+  settings; any product template can override it with its own margin.
+- **Price lists are managed from the product**: open a product and add prices
+  there, choosing **General** or a specific **customer** — the product is
+  already implied. There are no separate price-list screens; behind the scenes
+  each scope is an automatic bucket (one general, one per customer).
+- Prices are **graduated, per-unit tiers** (per piece, per m² — per whatever the
+  product's output unit is): the highest tier whose *from quantity* is reached
+  sets the price, so larger orders can get a better unit price. A tier is either
+  a **fixed price** or a **% discount** off the calculated price.
+- **Customer-specific pricing**: when pricing for a customer, a matching
+  customer-bound tier beats the general one; otherwise general tiers apply.
+- **Quote view**: pick a product, a quantity and (optionally) a customer to see
+  the cost build-up, the default-margin price, the resolved price-list price and
+  the resulting **margin in € and %** — including a clear warning when a chosen
+  price sits **below internal cost** (a deliberate commercial call the tool
+  surfaces rather than hides).
+- Gated by `pricing.view` / `pricing.manage`.
 
 ---
 

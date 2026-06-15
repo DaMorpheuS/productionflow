@@ -5,8 +5,9 @@ defmodule ProductionflowWeb.Catalog.ProductTemplateLiveTest do
   import Productionflow.CatalogFixtures
   import Productionflow.ProductionFixtures
   import Productionflow.InventoryFixtures
+  import Productionflow.PricingFixtures
 
-  alias Productionflow.Catalog
+  alias Productionflow.{Catalog, Pricing}
 
   defp complete_machine do
     machine_fixture(%{
@@ -171,6 +172,53 @@ defmodule ProductionflowWeb.Catalog.ProductTemplateLiveTest do
         |> render_change()
 
       assert html =~ "Complex shape"
+    end
+  end
+
+  describe "Pricing on the product" do
+    setup [:register_and_log_in_user]
+
+    @tag permissions: ["catalog.view", "pricing.manage"]
+    test "adds a general price tier and deletes it", %{conn: conn} do
+      template = product_template_fixture(%{output_unit: "flyer"})
+
+      {:ok, lv, _html} = live(conn, ~p"/catalog/products/#{template}")
+
+      lv
+      |> form("#add-tier-form",
+        item: %{
+          scope_relation_id: "",
+          min_quantity: "1000",
+          kind: "fixed_price",
+          unit_price: "0.12"
+        }
+      )
+      |> render_submit()
+
+      assert has_element?(lv, "table", "General")
+      assert has_element?(lv, "table", "1000+")
+      assert length(Pricing.template_price_tiers(template)) == 1
+
+      lv |> element("table a", "Delete") |> render_click()
+      assert Pricing.template_price_tiers(template) == []
+    end
+
+    @tag permissions: ["catalog.view", "pricing.view"]
+    test "view-only pricing users see prices but no add form", %{conn: conn} do
+      template = product_template_fixture()
+      price_tier_fixture(template, %{min_quantity: Decimal.new(1), unit_price: "0.50"})
+
+      {:ok, _lv, html} = live(conn, ~p"/catalog/products/#{template}")
+      assert html =~ "Price lists"
+      refute html =~ "add-tier-form"
+    end
+
+    @tag permissions: ["catalog.view"]
+    test "users without pricing access don't see the pricing section", %{conn: conn} do
+      template = product_template_fixture()
+      {:ok, _lv, html} = live(conn, ~p"/catalog/products/#{template}")
+      refute html =~ "add-tier-form"
+      refute html =~ "Graduated per-unit prices"
     end
   end
 end

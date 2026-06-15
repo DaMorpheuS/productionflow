@@ -119,6 +119,13 @@ defmodule ProductionflowWeb.Layouts do
         >
           {gettext("Products")}
         </.nav_link>
+        <.nav_link
+          :if={Scope.can?(@current_scope, "pricing.view")}
+          navigate={~p"/pricing/quote"}
+          icon="hero-calculator"
+        >
+          {gettext("Quote")}
+        </.nav_link>
 
         <div
           :if={Scope.admin?(@current_scope)}
