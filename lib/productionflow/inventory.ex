@@ -14,7 +14,13 @@ defmodule Productionflow.Inventory do
   import Ecto.Query, warn: false
   alias Productionflow.Repo
 
-  alias Productionflow.Inventory.{Material, Category, StockMovement}
+  alias Productionflow.Inventory.{
+    Material,
+    Category,
+    StockMovement,
+    MaterialType,
+    FieldDefinition
+  }
 
   ## Materials
 
@@ -63,19 +69,33 @@ defmodule Productionflow.Inventory do
 
   defp filter_low_stock(query, _), do: query
 
-  @doc "Gets a material with category, supplier and movements (newest first) preloaded."
+  @doc "Gets a material with category, supplier, type+fields and movements (newest first) preloaded."
   def get_material!(id) do
     movements =
       from(s in StockMovement, order_by: [desc: s.inserted_at, desc: s.id], preload: :user)
 
     Material
     |> Repo.get!(id)
-    |> Repo.preload([:category, :supplier, movements: movements])
+    |> Repo.preload([
+      :category,
+      :supplier,
+      [material_type: :field_definitions],
+      movements: movements
+    ])
   end
 
-  @doc "Returns a changeset for a material."
-  def change_material(%Material{} = material, attrs \\ %{}) do
-    Material.changeset(material, attrs)
+  @doc """
+  Returns a changeset for a material, validating custom attributes against the
+  field definitions of the given (or the material's current) type.
+  """
+  def change_material(material, attrs \\ %{}, field_definitions \\ nil)
+
+  def change_material(%Material{} = material, attrs, nil) do
+    Material.changeset(material, attrs, field_definitions_from_attrs(attrs, material))
+  end
+
+  def change_material(%Material{} = material, attrs, field_definitions) do
+    Material.changeset(material, attrs, field_definitions)
   end
 
   @doc """
@@ -84,9 +104,11 @@ defmodule Productionflow.Inventory do
   """
   def create_material(attrs) do
     {opening, attrs} = pop_opening_stock(attrs)
+    field_definitions = field_definitions_from_attrs(attrs, %Material{})
 
     Repo.transact(fn ->
-      with {:ok, material} <- %Material{} |> Material.changeset(attrs) |> Repo.insert() do
+      with {:ok, material} <-
+             %Material{} |> Material.changeset(attrs, field_definitions) |> Repo.insert() do
         maybe_book_opening(material, opening)
       end
     end)
@@ -130,8 +152,18 @@ defmodule Productionflow.Inventory do
   @doc "Updates a material's catalog fields (not its stock)."
   def update_material(%Material{} = material, attrs) do
     material
-    |> Material.changeset(attrs)
+    |> Material.changeset(attrs, field_definitions_from_attrs(attrs, material))
     |> Repo.update()
+  end
+
+  # Resolves the field definitions for the type referenced by the incoming attrs,
+  # falling back to the material's currently persisted type. Blank type → [].
+  defp field_definitions_from_attrs(attrs, %Material{} = material) do
+    case fetch(attrs, :material_type_id) do
+      nil -> field_definitions_for(material.material_type_id)
+      "" -> []
+      id -> field_definitions_for(id)
+    end
   end
 
   @doc "Archives a material."
@@ -173,6 +205,62 @@ defmodule Productionflow.Inventory do
 
   @doc "Deletes a category (materials keep existing; their category is cleared)."
   def delete_category(%Category{} = category), do: Repo.delete(category)
+
+  ## Material types & custom field definitions
+
+  @doc "Lists material types ordered by name."
+  def list_material_types, do: MaterialType |> order_by(asc: :name) |> Repo.all()
+
+  @doc "Gets a material type with its field definitions (ordered) preloaded."
+  def get_material_type!(id),
+    do: MaterialType |> Repo.get!(id) |> Repo.preload(:field_definitions)
+
+  @doc "Returns a changeset for a material type."
+  def change_material_type(%MaterialType{} = type, attrs \\ %{}),
+    do: MaterialType.changeset(type, attrs)
+
+  @doc "Creates a material type."
+  def create_material_type(attrs),
+    do: %MaterialType{} |> MaterialType.changeset(attrs) |> Repo.insert()
+
+  @doc "Updates a material type."
+  def update_material_type(%MaterialType{} = type, attrs),
+    do: type |> MaterialType.changeset(attrs) |> Repo.update()
+
+  @doc "Deletes a material type (its field definitions cascade; materials keep existing)."
+  def delete_material_type(%MaterialType{} = type), do: Repo.delete(type)
+
+  @doc "Returns the field definitions of a type (ordered), or `[]` for a nil type."
+  def field_definitions_for(nil), do: []
+
+  def field_definitions_for(material_type_id) do
+    from(f in FieldDefinition,
+      where: f.material_type_id == ^material_type_id,
+      order_by: [asc: f.position, asc: f.id]
+    )
+    |> Repo.all()
+  end
+
+  @doc "Gets a field definition."
+  def get_field_definition!(id), do: Repo.get!(FieldDefinition, id)
+
+  @doc "Returns a changeset for a field definition."
+  def change_field_definition(%FieldDefinition{} = definition, attrs \\ %{}),
+    do: FieldDefinition.changeset(definition, attrs)
+
+  @doc "Adds a field definition to a material type."
+  def create_field_definition(%MaterialType{} = type, attrs) do
+    %FieldDefinition{material_type_id: type.id}
+    |> FieldDefinition.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  @doc "Updates a field definition."
+  def update_field_definition(%FieldDefinition{} = definition, attrs),
+    do: definition |> FieldDefinition.changeset(attrs) |> Repo.update()
+
+  @doc "Deletes a field definition."
+  def delete_field_definition(%FieldDefinition{} = definition), do: Repo.delete(definition)
 
   ## Stock movements (booking)
 

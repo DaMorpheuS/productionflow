@@ -16,7 +16,7 @@ alias Productionflow.Repo
 alias Productionflow.Accounts
 alias Productionflow.Accounts.{Role, User, Permissions}
 alias Productionflow.Inventory
-alias Productionflow.Inventory.{Category, Material}
+alias Productionflow.Inventory.{Category, Material, MaterialType, FieldDefinition}
 
 # Idempotent: an Administrator role holding every permission, and an admin user
 # assigned to it. Re-running keeps both in sync.
@@ -285,3 +285,70 @@ IO.puts(
   "Inventory seed: #{created} material(s) created, #{existing} already present " <>
     "across #{length(inventory)} categories."
 )
+
+# Demo material types with custom fields, and a few materials given attributes.
+# Idempotent: types matched by name, field definitions by [type, key].
+
+ensure_type = fn name ->
+  case Repo.get_by(MaterialType, name: name) do
+    nil ->
+      {:ok, type} = Inventory.create_material_type(%{name: name})
+      type
+
+    type ->
+      type
+  end
+end
+
+ensure_field = fn type, attrs ->
+  case Repo.get_by(FieldDefinition, material_type_id: type.id, key: attrs.key) do
+    nil -> {:ok, _} = Inventory.create_field_definition(type, attrs)
+    _ -> :ok
+  end
+end
+
+types = [
+  {"Sheet paper",
+   [
+     %{key: "grammage", label: "Grammage", field_type: :number, unit: "g/m²", position: 1},
+     %{key: "thickness", label: "Thickness", field_type: :number, unit: "µm", position: 2},
+     %{
+       key: "coating",
+       label: "Coating",
+       field_type: :select,
+       options: ["gloss", "matte", "silk"],
+       position: 3
+     }
+   ]},
+  {"Roll media",
+   [
+     %{key: "width", label: "Width", field_type: :number, unit: "mm", position: 1},
+     %{key: "finish", label: "Finish", field_type: :text, position: 2}
+   ]}
+]
+
+type_by_name =
+  Map.new(types, fn {name, fields} ->
+    type = ensure_type.(name)
+    Enum.each(fields, &ensure_field.(type, &1))
+    {name, type}
+  end)
+
+# Attach attributes to a few seeded materials (by SKU).
+attribute_assignments = [
+  {"PAP-90-A4", "Sheet paper", %{"grammage" => "90", "coating" => "matte"}},
+  {"PAP-300-A4", "Sheet paper", %{"grammage" => "300", "coating" => "silk"}},
+  {"SUB-SAV", "Roll media", %{"width" => "1370", "finish" => "matte"}},
+  {"SUB-VINYL-510", "Roll media", %{"width" => "1600", "finish" => "gloss"}}
+]
+
+Enum.each(attribute_assignments, fn {sku, type_name, attributes} ->
+  if material = Repo.get_by(Material, sku: sku) do
+    type = Map.fetch!(type_by_name, type_name)
+
+    {:ok, _} =
+      Inventory.update_material(material, %{material_type_id: type.id, attributes: attributes})
+  end
+end)
+
+IO.puts("Material-type seed: #{map_size(type_by_name)} types ensured with custom fields.")

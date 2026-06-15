@@ -73,7 +73,25 @@ defmodule ProductionflowWeb.Inventory.MaterialLive.Show do
             label={gettext("Minimum stock")}
             value={Decimal.to_string(@material.minimum_stock)}
           />
+          <.detail
+            :if={@material.material_type}
+            label={gettext("Type")}
+            value={@material.material_type.name}
+          />
         </dl>
+
+        <div :if={@material.material_type} class="mt-4">
+          <p class="text-xs font-semibold uppercase tracking-wide text-base-content/50">
+            {@material.material_type.name}
+          </p>
+          <dl class="mt-1 grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-3">
+            <.detail
+              :for={definition <- @material.material_type.field_definitions}
+              label={field_label(definition)}
+              value={attribute_display(@material.attributes, definition)}
+            />
+          </dl>
+        </div>
       </div>
 
       <section :if={@can_book} class="rounded-xl border border-base-300 bg-base-100 p-6">
@@ -273,5 +291,25 @@ defmodule ProductionflowWeb.Inventory.MaterialLive.Show do
 
   defp signed_class(%Decimal{} = q) do
     if Decimal.compare(q, 0) == :lt, do: "text-error", else: "text-success"
+  end
+
+  defp field_label(%{label: label, unit: unit}) when unit not in [nil, ""],
+    do: "#{label} (#{unit})"
+
+  defp field_label(%{label: label}), do: label
+
+  defp attribute_display(attributes, %{key: key, field_type: :boolean}) do
+    case Map.get(attributes, key) do
+      true -> gettext("Yes")
+      false -> gettext("No")
+      _ -> nil
+    end
+  end
+
+  defp attribute_display(attributes, %{key: key}) do
+    case Map.get(attributes, key) do
+      value when value in [nil, ""] -> nil
+      value -> to_string(value)
+    end
   end
 end

@@ -149,6 +149,12 @@ defmodule ProductionflowWeb.Router do
       live "/materials/new", MaterialLive.Form, :new
       live "/materials/:id/edit", MaterialLive.Form, :edit
       live "/categories", CategoryLive.Index, :index
+      live "/types", MaterialTypeLive.Index, :index
+      live "/types/new", MaterialTypeLive.Form, :new
+      live "/types/:id/edit", MaterialTypeLive.Form, :edit
+      live "/types/:id/fields/new", FieldDefinitionLive.Form, :new
+      live "/types/:id/fields/:field_id/edit", FieldDefinitionLive.Form, :edit
+      live "/types/:id", MaterialTypeLive.Show, :show
     end
 
     live_session :inventory,

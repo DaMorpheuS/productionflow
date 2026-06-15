@@ -14,6 +14,29 @@ defmodule Productionflow.InventoryFixtures do
     category
   end
 
+  def material_type_fixture(attrs \\ %{}) do
+    {:ok, type} =
+      attrs
+      |> Enum.into(%{name: "Type #{System.unique_integer([:positive])}"})
+      |> Inventory.create_material_type()
+
+    type
+  end
+
+  def field_definition_fixture(type, attrs \\ %{}) do
+    {:ok, definition} =
+      Inventory.create_field_definition(
+        type,
+        Enum.into(attrs, %{
+          key: "field_#{System.unique_integer([:positive])}",
+          label: "Field",
+          field_type: :text
+        })
+      )
+
+    definition
+  end
+
   def material_fixture(attrs \\ %{}) do
     {:ok, material} =
       attrs

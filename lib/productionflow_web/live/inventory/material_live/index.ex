@@ -47,6 +47,9 @@ defmodule ProductionflowWeb.Inventory.MaterialLive.Index do
           <.button :if={@can_manage} navigate={~p"/inventory/categories"}>
             {gettext("Categories")}
           </.button>
+          <.button :if={@can_manage} navigate={~p"/inventory/types"}>
+            {gettext("Types")}
+          </.button>
           <.button :if={@can_manage} variant="primary" navigate={~p"/inventory/materials/new"}>
             <.icon name="hero-plus" class="size-4" /> {gettext("New material")}
           </.button>

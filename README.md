@@ -106,6 +106,12 @@ milestones**. Each milestone is fully tested and ends in its own commit.
   thresholds flag materials that need reordering.
 - Three permission levels: `inventory.view` (see), `inventory.manage` (edit
   materials & categories), `inventory.book` (book stock movements).
+- **Material types with custom fields** (modular): define material *types* (e.g.
+  "Sheet paper", "Roll media"), each with its own custom fields — text, number
+  (with a unit like mm or g/m²), yes/no, or a dropdown of choices, with optional
+  required flag and default. A material picks a type and its form then shows
+  those fields; values are validated and stored per material, so you can capture
+  thickness, grammage, width, coating, etc. without code changes.
 
 ---
 
