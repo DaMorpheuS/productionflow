@@ -167,6 +167,34 @@ defmodule ProductionflowWeb.Router do
     end
   end
 
+  # Catalog. Product templates (route + bill of materials). Manage session first
+  # so static routes win over /products/:id.
+  scope "/catalog", ProductionflowWeb.Catalog, as: :catalog do
+    pipe_through [:browser, :require_authenticated_user]
+
+    live_session :catalog_manage,
+      on_mount: [
+        {ProductionflowWeb.UserAuth, :require_authenticated},
+        {ProductionflowWeb.UserAuth, {:require_permission, "catalog.manage"}}
+      ] do
+      live "/products/new", ProductTemplateLive.Form, :new
+      live "/products/:id/edit", ProductTemplateLive.Form, :edit
+      live "/products/:id/steps/new", RouteStepLive.Form, :new
+      live "/products/:id/steps/:step_id/edit", RouteStepLive.Form, :edit
+      live "/products/:id/materials/new", TemplateMaterialLive.Form, :new
+      live "/products/:id/materials/:material_id/edit", TemplateMaterialLive.Form, :edit
+    end
+
+    live_session :catalog,
+      on_mount: [
+        {ProductionflowWeb.UserAuth, :require_authenticated},
+        {ProductionflowWeb.UserAuth, {:require_permission, "catalog.view"}}
+      ] do
+      live "/products", ProductTemplateLive.Index, :index
+      live "/products/:id", ProductTemplateLive.Show, :show
+    end
+  end
+
   scope "/", ProductionflowWeb do
     pipe_through [:browser]
 

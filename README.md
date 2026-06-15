@@ -33,7 +33,8 @@ milestones**. Each milestone is fully tested and ends in its own commit.
 | M2 | Relations (CRM-light) — relations, contacts, addresses, notes | ✅ Done |
 | M3 | Production resources — machines, time engine, internal-cost calculator | ✅ Done |
 | M4 | Materials & inventory — materials, categories, stock movement ledger | ✅ Done |
-| M5 | Catalog & pricing — product templates (routes) + cost-based pricing engine | ⬜ Planned |
+| M5a | Catalog — product templates (production route + bill of materials) + cost/time preview | ✅ Done |
+| M5b | Pricing — customer price (margin) + price lists + quote view | ⬜ Planned |
 | M6 | Orders — orders, lines, per-line production routes, lifecycle, stock consumption | ⬜ Planned |
 | M7 | Hardening & dashboard — overview, search, demo data | ⬜ Planned |
 
@@ -112,6 +113,24 @@ milestones**. Each milestone is fully tested and ends in its own commit.
   required flag and default. A material picks a type and its form then shows
   those fields; values are validated and stored per material, so you can capture
   thickness, grammage, width, coating, etc. without code changes.
+
+### M5a — Catalog (product templates)
+
+- **Product templates** = a reusable recipe for something you make: a
+  **production route** (ordered steps on machines) plus a **bill of materials**.
+- **Route steps** each pick a machine and a **quantity factor** — how many
+  machine units one product unit needs (e.g. 0.25 sheet per flyer for 4-up
+  printing, or multiple passes). Optional per-machine time modifiers can be
+  switched on per step.
+- **Bill of materials** lines are fully flexible: a quantity per product unit
+  (fractional, e.g. 0.25 sheet/item, or large, e.g. 5 ml ink/item) plus an
+  optional **waste %**.
+- **Cost & time preview**: enter a quantity on a product and instantly see the
+  total production time and the internal cost broken down into machine, labour,
+  energy and materials — plus the cost per unit. (Customer pricing with margin
+  and price lists comes next, in M5b.)
+- Gated by `catalog.view` / `catalog.manage`. Referenced machines and materials
+  are protected from deletion so a recipe can't be silently broken.
 
 ---
 

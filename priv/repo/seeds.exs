@@ -17,6 +17,10 @@ alias Productionflow.Accounts
 alias Productionflow.Accounts.{Role, User, Permissions}
 alias Productionflow.Inventory
 alias Productionflow.Inventory.{Category, Material, MaterialType, FieldDefinition}
+alias Productionflow.Production
+alias Productionflow.Production.Machine
+alias Productionflow.Catalog
+alias Productionflow.Catalog.ProductTemplate
 
 # Idempotent: an Administrator role holding every permission, and an admin user
 # assigned to it. Re-running keeps both in sync.
@@ -350,6 +354,10 @@ materials = [
   }
 ]
 
+# Remove the demo product template first (cascades its bill of materials) so the
+# materials it references can be replaced below despite the :restrict FK.
+Repo.delete_all(from(t in ProductTemplate, where: t.sku == "PRD-FLY-A5"))
+
 # Remove any previously seeded demo materials (old and current SKUs), cascading
 # their stock movements, then recreate from the list above.
 old_skus = ~w(PAP-90-A4 PAP-120-A4 PAP-300-A4 SUB-VINYL-510 SUB-SAV SUB-FOAM-5 SUB-DIBOND-3)
@@ -385,3 +393,61 @@ IO.puts(
   "Inventory seed: replaced demo materials — #{length(materials)} created " <>
     "(#{typed} with a material type) across #{map_size(type_by_name)} types."
 )
+
+# Demo production machine + a product template (route + bill of materials), so
+# the catalog cost/time preview has real data. Idempotent: machine by name, the
+# product template deleted-and-recreated by SKU.
+
+# Organization energy tariff so the energy cost line is non-zero.
+{:ok, _} = Production.update_settings(%{energy_price_per_kwh: "0.30"})
+
+press =
+  case Repo.get_by(Machine, name: "Digital press") do
+    nil ->
+      {:ok, machine} =
+        Production.create_machine(%{
+          name: "Digital press",
+          output_unit: "sheet",
+          units_per_hour: "4000",
+          setup_minutes: "10",
+          power_kw: "2.5",
+          purchase_price: "80000",
+          residual_value: "5000",
+          lifetime_years: "7",
+          yearly_maintenance_cost: "6000",
+          productive_hours_per_year: "1500"
+        })
+
+      machine
+
+    machine ->
+      machine
+  end
+
+flyer_sku = "PRD-FLY-A5"
+Repo.delete_all(from(t in ProductTemplate, where: t.sku == ^flyer_sku))
+
+{:ok, flyer} =
+  Catalog.create_product_template(%{
+    name: "A5 flyer 4/4",
+    sku: flyer_sku,
+    output_unit: "flyer",
+    description: "A5 full-colour flyer, double-sided, printed 4-up on the digital press."
+  })
+
+# 4 flyers per sheet → 0.25 sheet per flyer.
+{:ok, _} =
+  Catalog.add_route_step(flyer, %{"machine_id" => press.id, "quantity_per_unit" => "0.25"})
+
+for {sku, qty_per_unit, waste} <- [{"PAP-90-OFF", "0.25", "3"}, {"INK-ECO-K", "0.002", "0"}] do
+  if material = Repo.get_by(Material, sku: sku) do
+    {:ok, _} =
+      Catalog.add_template_material(flyer, %{
+        "material_id" => material.id,
+        "quantity_per_unit" => qty_per_unit,
+        "waste_pct" => waste
+      })
+  end
+end
+
+IO.puts("Catalog seed: ensured demo machine \"#{press.name}\" and product \"#{flyer.name}\".")

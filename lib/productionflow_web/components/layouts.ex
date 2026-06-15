@@ -112,6 +112,13 @@ defmodule ProductionflowWeb.Layouts do
         >
           {gettext("Materials")}
         </.nav_link>
+        <.nav_link
+          :if={Scope.can?(@current_scope, "catalog.view")}
+          navigate={~p"/catalog/products"}
+          icon="hero-rectangle-stack"
+        >
+          {gettext("Products")}
+        </.nav_link>
 
         <div
           :if={Scope.admin?(@current_scope)}
