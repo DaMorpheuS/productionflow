@@ -27,8 +27,17 @@ defmodule Productionflow.Orders.OrderLine do
 
     has_many :materials, Productionflow.Orders.OrderLineMaterial
 
+    many_to_many :depends_on, __MODULE__,
+      join_through: "order_line_dependencies",
+      join_keys: [order_line_id: :id, depends_on_id: :id],
+      on_replace: :delete
+
     timestamps(type: :utc_datetime)
   end
+
+  @doc "True when this line has no product template — its route is built ad-hoc."
+  def ad_hoc?(%__MODULE__{product_template_id: nil}), do: true
+  def ad_hoc?(%__MODULE__{}), do: false
 
   @doc "The price-source values."
   def price_sources, do: @price_sources

@@ -42,6 +42,19 @@ defmodule Productionflow.Orders.OrderRouteStep do
     |> assoc_constraint(:machine)
   end
 
+  @doc """
+  Changeset for an ad-hoc step: the user picks a machine and the total quantity
+  it processes for the line (`machine_quantity`), from which time/cost are
+  derived in the context.
+  """
+  def ad_hoc_changeset(step, attrs) do
+    step
+    |> cast(attrs, [:machine_id, :machine_quantity])
+    |> validate_required([:machine_id, :machine_quantity])
+    |> validate_number(:machine_quantity, greater_than: 0)
+    |> assoc_constraint(:machine)
+  end
+
   @doc "Changeset moving the step to `new_status`, rejecting illegal transitions."
   def transition_changeset(step, new_status) do
     change = change(step, status: new_status)

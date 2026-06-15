@@ -18,7 +18,7 @@ defmodule Productionflow.Orders do
 
   import Ecto.Query, warn: false
   alias Productionflow.Repo
-  alias Productionflow.{Catalog, Pricing, Inventory}
+  alias Productionflow.{Catalog, Pricing, Inventory, Production}
 
   alias Productionflow.Orders.{
     Order,
@@ -86,12 +86,14 @@ defmodule Productionflow.Orders do
   defp filter_order_status(query, status) when status in [nil, "", :all], do: query
   defp filter_order_status(query, status), do: where(query, [o], o.status == ^status)
 
-  @doc "Gets an order with its customer, lines, route steps and materials preloaded."
+  @doc "Gets an order with its customer, lines, route steps, materials and dependencies preloaded."
   def get_order!(id) do
     Order
     |> Repo.get!(id)
-    |> Repo.preload([:relation, lines: [:route_steps, :materials]])
+    |> Repo.preload([:relation, lines: line_preloads()])
   end
+
+  defp line_preloads, do: [:route_steps, :materials, depends_on: :route_steps]
 
   @doc "Returns a changeset for an order's editable fields."
   def change_order(%Order{} = order, attrs \\ %{}), do: Order.changeset(order, attrs)
@@ -159,9 +161,9 @@ defmodule Productionflow.Orders do
 
   ## Lines
 
-  @doc "Gets an order line with its route steps and materials preloaded."
+  @doc "Gets an order line with its route steps, materials and dependencies preloaded."
   def get_line!(id),
-    do: OrderLine |> Repo.get!(id) |> Repo.preload([:route_steps, :materials])
+    do: OrderLine |> Repo.get!(id) |> Repo.preload(line_preloads())
 
   @doc """
   Adds a line built from a product template at `quantity`: snapshots the
@@ -254,6 +256,285 @@ defmodule Productionflow.Orders do
     Repo.one(from o in Order, where: o.id == ^order_id, select: o.status) == :draft
   end
 
+  ## Ad-hoc lines (built from scratch, not from a template)
+
+  @doc "Returns a changeset for an order line's editable fields."
+  def change_line(%OrderLine{} = line, attrs \\ %{}), do: OrderLine.changeset(line, attrs)
+
+  @doc """
+  Adds a blank, ad-hoc line (no template) to a draft order. A non-blank
+  `unit_price` makes the price manual; otherwise it is calculated from the line's
+  route + materials cost plus the default margin as those are added.
+  """
+  def add_blank_line(%Order{status: :draft} = order, attrs) do
+    manual = parse_decimal(attrs["unit_price"])
+
+    %OrderLine{
+      order_id: order.id,
+      position: next_line_position(order),
+      price_source: if(manual, do: :manual, else: :calculated),
+      unit_price: manual
+    }
+    |> OrderLine.changeset(attrs)
+    |> Repo.insert()
+    |> recalc_after()
+  end
+
+  def add_blank_line(%Order{}, _attrs), do: {:error, :not_draft}
+
+  @doc "Updates an ad-hoc line's fields (description, quantity, output unit, manual price)."
+  def update_line(%OrderLine{} = line, attrs) do
+    with :ok <- ensure_editable(line) do
+      manual = parse_decimal(attrs["unit_price"])
+
+      line
+      |> OrderLine.changeset(attrs)
+      |> Ecto.Changeset.put_change(:price_source, if(manual, do: :manual, else: :calculated))
+      |> Ecto.Changeset.put_change(:unit_price, manual)
+      |> Repo.update()
+      |> recalc_after()
+    end
+  end
+
+  ## Ad-hoc route steps
+
+  @doc "Gets an order route step."
+  def get_line_route_step!(id), do: Repo.get!(OrderRouteStep, id)
+
+  @doc """
+  Adds a route step to an ad-hoc line: the machine plus the total quantity it
+  processes (`machine_quantity`), from which time and cost are derived.
+  """
+  def add_line_route_step(%OrderLine{} = line, attrs) do
+    with :ok <- ensure_editable(line) do
+      changeset =
+        OrderRouteStep.ad_hoc_changeset(
+          %OrderRouteStep{order_line_id: line.id, position: next_step_position(line)},
+          attrs
+        )
+
+      if changeset.valid? do
+        changeset
+        |> apply_step_estimate()
+        |> Repo.insert()
+        |> recalc_line_after(line)
+      else
+        {:error, %{changeset | action: :insert}}
+      end
+    end
+  end
+
+  @doc "Deletes a route step from an ad-hoc line."
+  def delete_line_route_step(%OrderRouteStep{} = step) do
+    line = get_line!(step.order_line_id)
+
+    with :ok <- ensure_editable(line) do
+      Repo.delete(step)
+      {:ok, recalculate_line!(get_line!(line.id))}
+    end
+  end
+
+  # Fills a valid ad-hoc step changeset with the machine name + time/cost snapshot.
+  defp apply_step_estimate(changeset) do
+    machine = Production.get_machine!(Ecto.Changeset.get_field(changeset, :machine_id))
+    quantity = Ecto.Changeset.get_field(changeset, :machine_quantity)
+    est = Production.estimate(machine, quantity, [])
+
+    changeset
+    |> Ecto.Changeset.put_change(:machine_name, machine.name)
+    |> Ecto.Changeset.put_change(:quantity_per_unit, Decimal.new(1))
+    |> Ecto.Changeset.put_change(:duration_minutes, est.duration_minutes)
+    |> Ecto.Changeset.put_change(:machine_cost, est.machine_cost)
+    |> Ecto.Changeset.put_change(:labour_cost, est.labour_cost)
+    |> Ecto.Changeset.put_change(:energy_cost, est.energy_cost)
+  end
+
+  defp next_step_position(line) do
+    max =
+      from(s in OrderRouteStep, where: s.order_line_id == ^line.id, select: max(s.position))
+      |> Repo.one()
+
+    (max || -1) + 1
+  end
+
+  ## Ad-hoc materials
+
+  @doc "Gets an order line material."
+  def get_line_material!(id), do: Repo.get!(OrderLineMaterial, id)
+
+  @doc "Adds a material (with a total consumption quantity) to an ad-hoc line."
+  def add_line_material(%OrderLine{} = line, attrs) do
+    with :ok <- ensure_editable(line) do
+      changeset = OrderLineMaterial.changeset(%OrderLineMaterial{order_line_id: line.id}, attrs)
+
+      if changeset.valid? do
+        changeset
+        |> apply_material_snapshot()
+        |> Repo.insert()
+        |> recalc_line_after(line)
+      else
+        {:error, %{changeset | action: :insert}}
+      end
+    end
+  end
+
+  @doc "Deletes a material from an ad-hoc line."
+  def delete_line_material(%OrderLineMaterial{} = line_material) do
+    line = get_line!(line_material.order_line_id)
+
+    with :ok <- ensure_editable(line) do
+      Repo.delete(line_material)
+      {:ok, recalculate_line!(get_line!(line.id))}
+    end
+  end
+
+  defp apply_material_snapshot(changeset) do
+    material = Inventory.get_material!(Ecto.Changeset.get_field(changeset, :material_id))
+    quantity = Ecto.Changeset.get_field(changeset, :quantity)
+
+    changeset
+    |> Ecto.Changeset.put_change(:material_name, material.name)
+    |> Ecto.Changeset.put_change(:unit, material.unit)
+    |> Ecto.Changeset.put_change(:unit_cost, material.cost_price)
+    |> Ecto.Changeset.put_change(:cost, Decimal.mult(quantity, material.cost_price))
+  end
+
+  # A line is editable (route/materials) only while ad-hoc and the order is draft.
+  defp ensure_editable(%OrderLine{} = line) do
+    cond do
+      not OrderLine.ad_hoc?(line) -> {:error, :not_ad_hoc}
+      not draft_order?(line.order_id) -> {:error, :not_draft}
+      true -> :ok
+    end
+  end
+
+  ## Line cost/price recomputation
+
+  @doc """
+  Recomputes a line's cost (from its route steps + materials) and, unless its
+  price is manual, its calculated price from the default margin. Returns the
+  reloaded line.
+  """
+  def recalculate_line!(%OrderLine{} = line) do
+    margin = Pricing.get_settings().default_margin_pct
+    machine = sum_machine_cost(line.route_steps)
+    labour = sum_decimal(line.route_steps, & &1.labour_cost)
+    energy = sum_decimal(line.route_steps, & &1.energy_cost)
+    material = sum_decimal(line.materials, & &1.cost)
+
+    total_cost =
+      if machine,
+        do: machine |> Decimal.add(labour) |> Decimal.add(energy) |> Decimal.add(material)
+
+    unit_cost = unit_div(total_cost, line.quantity)
+    {unit_price, total_price} = line_price(line, unit_cost, margin)
+    {unit_margin, total_margin} = line_margins(unit_price, unit_cost, total_price, total_cost)
+
+    line
+    |> Ecto.Changeset.change(
+      internal_unit_cost: unit_cost,
+      internal_total_cost: total_cost,
+      unit_price: unit_price,
+      total_price: total_price,
+      unit_margin: unit_margin,
+      total_margin: total_margin
+    )
+    |> Repo.update!()
+
+    get_line!(line.id)
+  end
+
+  defp line_price(%OrderLine{price_source: :manual} = line, _unit_cost, _margin),
+    do: {line.unit_price, mult_or_nil(line.unit_price, line.quantity)}
+
+  defp line_price(%OrderLine{} = line, unit_cost, margin) do
+    unit_price = Pricing.default_unit_price(unit_cost, margin)
+    {unit_price, mult_or_nil(unit_price, line.quantity)}
+  end
+
+  defp line_margins(unit_price, unit_cost, _total_price, _total_cost)
+       when is_nil(unit_price) or is_nil(unit_cost),
+       do: {nil, nil}
+
+  defp line_margins(unit_price, unit_cost, total_price, total_cost),
+    do: {Decimal.sub(unit_price, unit_cost), Decimal.sub(total_price, total_cost)}
+
+  defp sum_machine_cost(steps) do
+    Enum.reduce_while(steps, Decimal.new(0), fn step, acc ->
+      case step.machine_cost do
+        nil -> {:halt, nil}
+        cost -> {:cont, Decimal.add(acc, cost)}
+      end
+    end)
+  end
+
+  defp sum_decimal(rows, fun) do
+    Enum.reduce(rows, Decimal.new(0), fn row, acc ->
+      Decimal.add(acc, fun.(row) || Decimal.new(0))
+    end)
+  end
+
+  defp unit_div(nil, _qty), do: nil
+
+  defp unit_div(total, qty) do
+    if Decimal.compare(qty, 0) == :gt, do: Decimal.div(total, qty), else: nil
+  end
+
+  defp mult_or_nil(nil, _qty), do: nil
+  defp mult_or_nil(_price, nil), do: nil
+  defp mult_or_nil(price, qty), do: Decimal.mult(price, qty)
+
+  ## Dependencies
+
+  @doc """
+  Replaces a line's dependencies with the given line ids (same order only; self
+  and blanks ignored). Only while the order is a draft.
+  """
+  def set_line_dependencies(%OrderLine{} = line, depends_on_ids) do
+    if draft_order?(line.order_id) do
+      ids =
+        depends_on_ids
+        |> List.wrap()
+        |> Enum.reject(&(&1 in [nil, ""]))
+        |> Enum.map(&to_int/1)
+        |> Enum.reject(&(&1 == line.id))
+
+      deps = Repo.all(from l in OrderLine, where: l.id in ^ids and l.order_id == ^line.order_id)
+
+      line
+      |> Repo.preload(:depends_on)
+      |> Ecto.Changeset.change()
+      |> Ecto.Changeset.put_assoc(:depends_on, deps)
+      |> Repo.update()
+    else
+      {:error, :not_draft}
+    end
+  end
+
+  ## Shared helpers
+
+  defp recalc_after({:ok, line}), do: {:ok, recalculate_line!(get_line!(line.id))}
+  defp recalc_after(error), do: error
+
+  defp recalc_line_after({:ok, _child}, line),
+    do: {:ok, recalculate_line!(get_line!(line.id))}
+
+  defp recalc_line_after(error, _line), do: error
+
+  defp parse_decimal(value) when value in [nil, ""], do: nil
+
+  defp parse_decimal(value) when is_binary(value) do
+    case Decimal.parse(value) do
+      {decimal, _rest} -> decimal
+      :error -> nil
+    end
+  end
+
+  defp parse_decimal(%Decimal{} = value), do: value
+
+  defp to_int(value) when is_integer(value), do: value
+  defp to_int(value) when is_binary(value), do: String.to_integer(value)
+
   ## Lifecycle
 
   @doc "Moves an order to `new_status` (for confirmed / in_production / cancelled)."
@@ -303,13 +584,21 @@ defmodule Productionflow.Orders do
 
   @doc """
   Advances a route step to `new_status`. Only allowed while the owning order is
-  in production, and only for legal step transitions.
+  in production, the line is not blocked by an unfinished dependency, and the
+  step transition is legal.
   """
   def advance_step(%OrderRouteStep{} = step, new_status) do
-    if order_status_for_step(step) == :in_production do
-      step |> OrderRouteStep.transition_changeset(new_status) |> Repo.update()
-    else
-      {:error, :order_not_in_production}
+    line = get_line!(step.order_line_id)
+
+    cond do
+      order_status_for_step(step) != :in_production ->
+        {:error, :order_not_in_production}
+
+      new_status == :in_progress and blocked?(line) ->
+        {:error, :line_blocked}
+
+      true ->
+        step |> OrderRouteStep.transition_changeset(new_status) |> Repo.update()
     end
   end
 
@@ -328,16 +617,28 @@ defmodule Productionflow.Orders do
   ## Derived progress
 
   @doc """
-  The derived production status of a line from its route steps: `:done` when all
-  steps are done, `:in_progress` when any step has started, otherwise `:pending`.
+  The derived production status of a line: `:blocked` when a dependency line
+  isn't done yet, otherwise from its route steps — `:done` when all steps are
+  done, `:in_progress` when any has started, else `:pending`.
   """
-  def line_status(%OrderLine{route_steps: steps}) when is_list(steps) do
+  def line_status(%OrderLine{} = line) do
+    if blocked?(line), do: :blocked, else: status_from_steps(line.route_steps)
+  end
+
+  defp status_from_steps(steps) when is_list(steps) do
     cond do
       steps != [] and Enum.all?(steps, &(&1.status == :done)) -> :done
       Enum.any?(steps, &(&1.status in [:in_progress, :done])) -> :in_progress
       true -> :pending
     end
   end
+
+  # A line is blocked while any line it depends on is not fully done. When
+  # `depends_on` isn't loaded, treat as not blocked.
+  defp blocked?(%OrderLine{depends_on: deps}) when is_list(deps),
+    do: Enum.any?(deps, &(status_from_steps(&1.route_steps) != :done))
+
+  defp blocked?(_line), do: false
 
   @doc "True when the order has no unfinished route steps."
   def all_steps_done?(order_id) do

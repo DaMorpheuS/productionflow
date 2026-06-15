@@ -35,7 +35,7 @@ milestones**. Each milestone is fully tested and ends in its own commit.
 | M4 | Materials & inventory — materials, categories, stock movement ledger | ✅ Done |
 | M5a | Catalog — product templates (production route + bill of materials) + cost/time preview | ✅ Done |
 | M5b | Pricing — customer price (margin) + price lists + quote view | ✅ Done |
-| M6 | Orders — orders, lines, per-line production routes, lifecycle, stock consumption | 🔨 In progress |
+| M6 | Orders — orders, lines, per-line production routes, lifecycle, stock consumption | ✅ Done |
 | M7 | Quotes — saved multi-line quotes for a customer, lifecycle, validity, price/cost/margin snapshots, convert to order | ⬜ Planned |
 | M8 | Planning — scheduling board: order route steps onto machines over time, per-machine queues, due dates | ⬜ Planned |
 | M9 | Hardening & dashboard — overview, search, demo data | ⬜ Planned |
@@ -156,13 +156,15 @@ milestones**. Each milestone is fully tested and ends in its own commit.
   surfaces rather than hides).
 - Gated by `pricing.view` / `pricing.manage`.
 
-### M6 — Orders (in progress)
+### M6 — Orders
 
-- An **order** belongs to a customer and is made of one or more **lines**. Each
-  line is created from a product template, **snapshotting** its customer price,
-  internal cost and margin (via the pricing engine) and **copying** the
-  production route + bill of materials — so the order is a frozen record,
-  unaffected by later price/machine/material changes.
+- An **order** belongs to a customer and is made of one or more **lines**. A line
+  is either created **from a product template** — **snapshotting** its customer
+  price, internal cost and margin (via the pricing engine) and **copying** the
+  production route + bill of materials — or built **ad-hoc** (a one-off item with
+  its own machines + materials, optionally a manual price); its cost is computed
+  from those as you build it. Either way the order is a frozen record, unaffected
+  by later price/machine/material changes.
 - **Configurable numbering** (Order numbering settings): a per-year sequence
   (`ORD-2026-0001`, the default) or a continuous one, with a custom prefix.
 - **Lifecycle** `draft → confirmed → in_production → completed` (plus
@@ -173,9 +175,9 @@ milestones**. Each milestone is fully tested and ends in its own commit.
   order, which books a consumption movement for each line's materials (stock may
   go negative — a material can be specially purchased for the order). Orders are
   cancelled, never deleted.
+- **Line dependencies**: a line can depend on others (e.g. an assembly needs its
+  sub-items first); a blocked line can't start until its dependencies are done.
 - Gated by `orders.view` / `orders.manage`.
-- *Next (M6 phase 2):* ad-hoc lines built from scratch (own machines/materials)
-  and line dependencies (one line must finish before the next).
 
 ---
 

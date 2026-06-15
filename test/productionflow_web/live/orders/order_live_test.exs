@@ -144,4 +144,40 @@ defmodule ProductionflowWeb.Orders.OrderLiveTest do
       assert Orders.get_order!(order.id).status == :draft
     end
   end
+
+  describe "Show — custom (ad-hoc) lines" do
+    setup :register_and_log_in_user
+
+    @tag permissions: ["orders.manage"]
+    test "adds a custom line with a manual price and its own machine step", %{conn: conn} do
+      {_template, _material} = priced_template()
+      machine = Productionflow.Production.list_machines() |> hd()
+      order = order_fixture()
+
+      {:ok, lv, _html} = live(conn, ~p"/orders/#{order}")
+
+      lv
+      |> form("#add-custom-line-form", %{
+        description: "Custom box",
+        output_unit: "box",
+        quantity: "10",
+        unit_price: "25"
+      })
+      |> render_submit()
+
+      assert has_element?(lv, "section", "Custom box")
+      line = Orders.get_order!(order.id).lines |> hd()
+      assert line.price_source == :manual
+
+      lv
+      |> form("#add-step-#{line.id}", %{
+        line_id: line.id,
+        machine_id: machine.id,
+        machine_quantity: "100"
+      })
+      |> render_submit()
+
+      assert length(Orders.get_line!(line.id).route_steps) == 1
+    end
+  end
 end

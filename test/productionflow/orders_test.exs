@@ -223,4 +223,128 @@ defmodule Productionflow.OrdersTest do
       assert {:error, :not_draft} = Orders.delete_line(Orders.get_line!(line2.id))
     end
   end
+
+  describe "ad-hoc lines" do
+    defp ad_hoc_machine do
+      machine_fixture(%{
+        units_per_hour: Decimal.new(100),
+        setup_minutes: Decimal.new(0),
+        purchase_price: Decimal.new(10_000),
+        lifetime_years: Decimal.new(5),
+        yearly_maintenance_cost: Decimal.new(3_000),
+        productive_hours_per_year: Decimal.new(1_000)
+      })
+    end
+
+    test "builds cost from its own steps + materials, price from default margin" do
+      order = order_fixture()
+
+      {:ok, line} =
+        Orders.add_blank_line(order, %{
+          "description" => "Custom box",
+          "output_unit" => "box",
+          "quantity" => "10"
+        })
+
+      assert line.price_source == :calculated
+
+      {:ok, line} =
+        Orders.add_line_route_step(line, %{
+          "machine_id" => ad_hoc_machine().id,
+          "machine_quantity" => "100"
+        })
+
+      material = material_fixture(%{cost_price: Decimal.new(2)})
+
+      {:ok, line} =
+        Orders.add_line_material(line, %{"material_id" => material.id, "quantity" => "50"})
+
+      # machine €5 + material €100 = €105
+      assert Decimal.equal?(line.internal_total_cost, Decimal.new("105"))
+      assert length(line.route_steps) == 1
+      assert length(line.materials) == 1
+    end
+
+    test "a manual unit price overrides the calculated one" do
+      order = order_fixture()
+
+      {:ok, line} =
+        Orders.add_blank_line(order, %{
+          "description" => "Assembly",
+          "quantity" => "10",
+          "unit_price" => "25"
+        })
+
+      assert line.price_source == :manual
+      assert Decimal.equal?(line.unit_price, Decimal.new("25"))
+      assert Decimal.equal?(line.total_price, Decimal.new("250"))
+    end
+
+    test "route/material editing is rejected on template-based lines", %{} do
+      template = product_template_fixture(%{output_unit: "flyer"})
+      route_step_fixture(template, ad_hoc_machine(), %{quantity_per_unit: Decimal.new(1)})
+      template = Productionflow.Catalog.get_product_template!(template.id)
+
+      order = order_fixture()
+      {:ok, line} = Orders.add_line_from_template(order, template.id, "10")
+
+      assert {:error, :not_ad_hoc} =
+               Orders.add_line_route_step(line, %{
+                 "machine_id" => ad_hoc_machine().id,
+                 "machine_quantity" => "1"
+               })
+    end
+
+    test "deleting a step recomputes the line cost" do
+      order = order_fixture()
+      {:ok, line} = Orders.add_blank_line(order, %{"description" => "X", "quantity" => "10"})
+
+      {:ok, line} =
+        Orders.add_line_route_step(line, %{
+          "machine_id" => ad_hoc_machine().id,
+          "machine_quantity" => "100"
+        })
+
+      assert Decimal.compare(line.internal_total_cost, 0) == :gt
+      {:ok, line} = Orders.delete_line_route_step(hd(line.route_steps))
+      assert Decimal.equal?(line.internal_total_cost, Decimal.new("0"))
+    end
+  end
+
+  describe "line dependencies" do
+    setup :priced_setup
+
+    test "a line is blocked until its dependency is done", %{template: template} do
+      order = order_fixture()
+      {:ok, a} = Orders.add_line_from_template(order, template.id, "100")
+      {:ok, b} = Orders.add_line_from_template(order, template.id, "100")
+
+      assert {:ok, _} = Orders.set_line_dependencies(b, [a.id])
+      assert Orders.line_status(Orders.get_line!(b.id)) == :blocked
+
+      order = confirmed_in_production(order)
+      assert order.status == :in_production
+
+      b_step = hd(Orders.get_line!(b.id).route_steps)
+      assert {:error, :line_blocked} = Orders.advance_step(b_step, :in_progress)
+
+      # Finish A, then B unblocks.
+      for step <- Orders.get_line!(a.id).route_steps do
+        {:ok, _} = Orders.advance_step(Orders.get_route_step!(step.id), :in_progress)
+        {:ok, _} = Orders.advance_step(Orders.get_route_step!(step.id), :done)
+      end
+
+      assert Orders.line_status(Orders.get_line!(b.id)) == :pending
+      assert {:ok, _} = Orders.advance_step(Orders.get_route_step!(b_step.id), :in_progress)
+    end
+
+    test "dependencies can only be set while draft", %{template: template} do
+      order = order_fixture()
+      {:ok, a} = Orders.add_line_from_template(order, template.id, "100")
+      {:ok, b} = Orders.add_line_from_template(order, template.id, "100")
+      confirmed_in_production(order)
+
+      assert {:error, :not_draft} = Orders.set_line_dependencies(Orders.get_line!(b.id), [a.id])
+    end
+  end
 end
