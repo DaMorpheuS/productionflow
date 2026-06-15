@@ -23,6 +23,8 @@ alias Productionflow.Catalog
 alias Productionflow.Catalog.ProductTemplate
 alias Productionflow.Pricing
 alias Productionflow.Pricing.PriceListItem
+alias Productionflow.CRM
+alias Productionflow.Orders
 
 # Idempotent: an Administrator role holding every permission, and an admin user
 # assigned to it. Re-running keeps both in sync.
@@ -358,7 +360,23 @@ materials = [
 
 # Remove the demo product template first (cascades its bill of materials) so the
 # materials it references can be replaced below despite the :restrict FK. Its
-# price tiers also reference it via a :restrict FK, so clear those first.
+# price tiers AND any demo orders' lines reference it via :restrict FKs, so clear
+# those first (deleting the orders cascades their lines/steps/materials).
+flyer_order_ids =
+  Repo.all(
+    from(o in Productionflow.Orders.Order,
+      join: l in Productionflow.Orders.OrderLine,
+      on: l.order_id == o.id,
+      join: t in ProductTemplate,
+      on: t.id == l.product_template_id,
+      where: t.sku == "PRD-FLY-A5",
+      distinct: true,
+      select: o.id
+    )
+  )
+
+Repo.delete_all(from(o in Productionflow.Orders.Order, where: o.id in ^flyer_order_ids))
+
 Repo.delete_all(
   from(i in PriceListItem,
     join: t in ProductTemplate,
@@ -479,3 +497,27 @@ for {min_qty, price} <- [{"1", "0.18"}, {"1000", "0.12"}, {"5000", "0.08"}] do
 end
 
 IO.puts("Pricing seed: set default margin and ensured general volume tiers for the flyer.")
+
+# Demo customer + a confirmed order with one flyer line, so the orders area has
+# real data. Idempotent: the customer is matched by name, and the order is only
+# created when that customer has none (so re-running doesn't pile up orders).
+demo_customer =
+  case Repo.get_by(CRM.Relation, name: "Demo Print Customer") do
+    nil ->
+      {:ok, c} = CRM.create_relation(%{name: "Demo Print Customer", is_customer: true})
+      c
+
+    c ->
+      c
+  end
+
+unless Repo.exists?(
+         from(o in Productionflow.Orders.Order, where: o.relation_id == ^demo_customer.id)
+       ) do
+  {:ok, order} =
+    Orders.create_order(%{"relation_id" => demo_customer.id, "reference" => "DEMO-SEED"})
+
+  {:ok, _} = Orders.add_line_from_template(order, flyer.id, "1000")
+  {:ok, order} = Orders.transition_order(order, :confirmed)
+  IO.puts("Orders seed: created demo order #{order.number} for #{demo_customer.name}.")
+end

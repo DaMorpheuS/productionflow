@@ -215,6 +215,29 @@ defmodule ProductionflowWeb.Router do
     end
   end
 
+  scope "/orders", ProductionflowWeb.Orders, as: :orders do
+    pipe_through [:browser, :require_authenticated_user]
+
+    live_session :orders_manage,
+      on_mount: [
+        {ProductionflowWeb.UserAuth, :require_authenticated},
+        {ProductionflowWeb.UserAuth, {:require_permission, "orders.manage"}}
+      ] do
+      live "/new", OrderLive.Form, :new
+      live "/settings", OrderSettingsLive, :edit
+      live "/:id/edit", OrderLive.Form, :edit
+    end
+
+    live_session :orders,
+      on_mount: [
+        {ProductionflowWeb.UserAuth, :require_authenticated},
+        {ProductionflowWeb.UserAuth, {:require_permission, "orders.view"}}
+      ] do
+      live "/", OrderLive.Index, :index
+      live "/:id", OrderLive.Show, :show
+    end
+  end
+
   scope "/", ProductionflowWeb do
     pipe_through [:browser]
 
