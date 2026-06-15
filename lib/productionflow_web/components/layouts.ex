@@ -105,6 +105,13 @@ defmodule ProductionflowWeb.Layouts do
         >
           {gettext("Machines")}
         </.nav_link>
+        <.nav_link
+          :if={Scope.can?(@current_scope, "inventory.view")}
+          navigate={~p"/inventory/materials"}
+          icon="hero-cube"
+        >
+          {gettext("Materials")}
+        </.nav_link>
 
         <div
           :if={Scope.admin?(@current_scope)}

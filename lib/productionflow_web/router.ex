@@ -135,6 +135,32 @@ defmodule ProductionflowWeb.Router do
     end
   end
 
+  # Inventory. Read pages require inventory.view; material management requires
+  # inventory.manage; booking stock movements requires inventory.book (events on
+  # the material show page). Manage session first so static routes win.
+  scope "/inventory", ProductionflowWeb.Inventory, as: :inventory do
+    pipe_through [:browser, :require_authenticated_user]
+
+    live_session :inventory_manage,
+      on_mount: [
+        {ProductionflowWeb.UserAuth, :require_authenticated},
+        {ProductionflowWeb.UserAuth, {:require_permission, "inventory.manage"}}
+      ] do
+      live "/materials/new", MaterialLive.Form, :new
+      live "/materials/:id/edit", MaterialLive.Form, :edit
+      live "/categories", CategoryLive.Index, :index
+    end
+
+    live_session :inventory,
+      on_mount: [
+        {ProductionflowWeb.UserAuth, :require_authenticated},
+        {ProductionflowWeb.UserAuth, {:require_permission, "inventory.view"}}
+      ] do
+      live "/materials", MaterialLive.Index, :index
+      live "/materials/:id", MaterialLive.Show, :show
+    end
+  end
+
   scope "/", ProductionflowWeb do
     pipe_through [:browser]
 

@@ -32,7 +32,7 @@ milestones**. Each milestone is fully tested and ends in its own commit.
 | M1 | Core foundation — auth, roles & permissions, admin UI, app shell | ✅ Done |
 | M2 | Relations (CRM-light) — relations, contacts, addresses, notes | ✅ Done |
 | M3 | Production resources — machines, time engine, internal-cost calculator | ✅ Done |
-| M4 | Materials & inventory — materials, stock movement ledger | ⬜ Planned |
+| M4 | Materials & inventory — materials, categories, stock movement ledger | ✅ Done |
 | M5 | Catalog & pricing — product templates (routes) + cost-based pricing engine | ⬜ Planned |
 | M6 | Orders — orders, lines, per-line production routes, lifecycle, stock consumption | ⬜ Planned |
 | M7 | Hardening & dashboard — overview, search, demo data | ⬜ Planned |
@@ -87,6 +87,25 @@ milestones**. Each milestone is fully tested and ends in its own commit.
 - **Estimate widget**: on a machine you enter a quantity, tick any modifiers, and
   immediately see the duration and the machine / labour / energy / total internal
   cost — all gated by `production.view` / `production.manage`.
+
+### M4 — Materials & inventory
+
+- **Materials** with unit, cost & sales price, optional SKU, an optional
+  **supplier** (linked to a relation) and the supplier's own article code, and a
+  **category** for organization. Searchable and filterable by category, low
+  stock, and archived state.
+- **Stock as a movement ledger**: stock is never edited directly. Every
+  **purchase**, **consumption** or **adjustment** is a signed entry, and the
+  material's current stock is kept in sync transactionally — so the running
+  total always equals the sum of its movements.
+- **Smart bookings**: receiving a purchase with a unit cost updates the
+  material's cost price (last-purchase-price); adjustments support both
+  "set to counted amount" (stock-take) and a signed +/− delta; consumption may
+  take stock negative (back-orders) with a clear warning badge.
+- **Opening stock** can be entered when creating a material, and **low-stock**
+  thresholds flag materials that need reordering.
+- Three permission levels: `inventory.view` (see), `inventory.manage` (edit
+  materials & categories), `inventory.book` (book stock movements).
 
 ---
 

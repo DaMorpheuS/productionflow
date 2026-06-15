@@ -68,8 +68,10 @@ defmodule Productionflow.Accounts.Permissions do
   Expands a list of permissions with the ones they imply.
 
   A `"<area>.manage"` permission implies `"<area>.view"` — being able to manage
-  something always lets you see it. Used by `Productionflow.Accounts.Scope` so a
-  role only needs to be granted `manage` to also get `view`.
+  something always lets you see it. As a special case, `"inventory.book"` also
+  implies `"inventory.view"` so a booking-only user can reach the material page
+  (which lives in the view-gated live_session). Used by
+  `Productionflow.Accounts.Scope` so a role only needs the higher permission.
   """
   def expand(permissions) do
     permissions
@@ -80,6 +82,7 @@ defmodule Productionflow.Accounts.Permissions do
   defp implied_by(permission) do
     case String.split(permission, ".") do
       [area, "manage"] -> Enum.filter(["#{area}.view"], &valid?/1)
+      ["inventory", "book"] -> ["inventory.view"]
       _ -> []
     end
   end
