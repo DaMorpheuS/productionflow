@@ -180,4 +180,37 @@ defmodule ProductionflowWeb.Orders.OrderLiveTest do
       assert length(Orders.get_line!(line.id).route_steps) == 1
     end
   end
+
+  describe "Show — deliveries" do
+    setup :register_and_log_in_user
+
+    @tag permissions: ["orders.manage"]
+    test "adds delivery addresses and auto-splits a line", %{conn: conn} do
+      {template, _material} = priced_template()
+      order = order_fixture()
+
+      {:ok, lv, _html} = live(conn, ~p"/orders/#{order}")
+
+      lv
+      |> form("#add-line-form", %{product_template_id: template.id, quantity: "1000"})
+      |> render_submit()
+
+      lv |> form("#add-delivery-form", %{street: "A 1", city: "Amsterdam"}) |> render_submit()
+      assert has_element?(lv, "section", "Amsterdam")
+
+      lv |> form("#add-delivery-form", %{street: "B 2", city: "Rotterdam"}) |> render_submit()
+
+      order = Orders.get_order!(order.id)
+      line = hd(order.lines)
+
+      qtys =
+        order.deliveries
+        |> Enum.flat_map(& &1.items)
+        |> Enum.filter(&(&1.order_line_id == line.id))
+        |> Enum.map(& &1.quantity)
+
+      assert length(qtys) == 2
+      assert Enum.all?(qtys, &Decimal.equal?(&1, Decimal.new("500")))
+    end
+  end
 end

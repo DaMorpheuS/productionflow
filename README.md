@@ -177,6 +177,14 @@ milestones**. Each milestone is fully tested and ends in its own commit.
   cancelled, never deleted.
 - **Line dependencies**: a line can depend on others (e.g. an assembly needs its
   sub-items first); a blocked line can't start until its dependencies are done.
+- **Editable until production**: an order (header, lines, deliveries) stays
+  editable while `draft` *and* `confirmed`; it locks — freezing the snapshots —
+  once it goes into production.
+- **Delivery addresses**: an order can be delivered to one or more addresses,
+  chosen from the customer's saved addresses or typed one-off (optionally saved
+  back onto the customer). Each line's quantity is **auto-split equally** across
+  the delivery addresses (and re-divided when one is added or removed), with
+  manual per-address overrides.
 - Gated by `orders.view` / `orders.manage`.
 
 ---

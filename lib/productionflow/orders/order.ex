@@ -26,11 +26,17 @@ defmodule Productionflow.Orders.Order do
 
     has_many :lines, Productionflow.Orders.OrderLine, preload_order: [asc: :position, asc: :id]
 
+    has_many :deliveries, Productionflow.Orders.OrderDelivery,
+      preload_order: [asc: :position, asc: :id]
+
     timestamps(type: :utc_datetime)
   end
 
   @doc "The status values."
   def statuses, do: @statuses
+
+  @doc "Whether an order's header, lines and deliveries can still be edited."
+  def editable?(%__MODULE__{status: status}), do: status in [:draft, :confirmed]
 
   @doc "The statuses reachable from `status`."
   def next_statuses(status), do: Map.get(@transitions, status, [])

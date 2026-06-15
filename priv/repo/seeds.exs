@@ -518,6 +518,16 @@ unless Repo.exists?(
     Orders.create_order(%{"relation_id" => demo_customer.id, "reference" => "DEMO-SEED"})
 
   {:ok, _} = Orders.add_line_from_template(order, flyer.id, "1000")
+
+  {:ok, _} =
+    Orders.add_delivery(order, %{
+      "street" => "Keizersgracht 123",
+      "postal_code" => "1015 CJ",
+      "city" => "Amsterdam",
+      "country" => "NL",
+      "save_to_customer" => "true"
+    })
+
   {:ok, order} = Orders.transition_order(order, :confirmed)
   IO.puts("Orders seed: created demo order #{order.number} for #{demo_customer.name}.")
 end

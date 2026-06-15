@@ -3,7 +3,7 @@ defmodule ProductionflowWeb.Orders.OrderLive.Show do
 
   import ProductionflowWeb.Orders.Badges
 
-  alias Productionflow.{Orders, Catalog, Production, Inventory}
+  alias Productionflow.{Orders, Catalog, Production, Inventory, CRM}
   alias Productionflow.Orders.{Order, OrderLine}
   alias Productionflow.Accounts.Scope
 
@@ -25,8 +25,15 @@ defmodule ProductionflowWeb.Orders.OrderLive.Show do
     socket
     |> assign(:order, order)
     |> assign(:page_title, order.number)
+    |> assign(:can_edit, socket.assigns.can_manage and Order.editable?(order))
     |> assign(:totals, Orders.order_totals(order))
     |> assign(:all_done, Orders.all_steps_done?(order.id))
+    |> assign(:address_options, address_options(order))
+  end
+
+  defp address_options(order) do
+    CRM.get_relation!(order.relation_id).addresses
+    |> Enum.map(&{format_address(&1), &1.id})
   end
 
   defp reload(socket, message) do
@@ -49,7 +56,7 @@ defmodule ProductionflowWeb.Orders.OrderLive.Show do
           · {@order.relation.name}
         </:subtitle>
         <:actions>
-          <.button :if={@can_manage and @order.status == :draft} navigate={~p"/orders/#{@order}/edit"}>
+          <.button :if={@can_edit} navigate={~p"/orders/#{@order}/edit"}>
             {gettext("Edit")}
           </.button>
           <.button
@@ -111,7 +118,7 @@ defmodule ProductionflowWeb.Orders.OrderLive.Show do
             <div>
               <span class="font-medium">{line.description}</span>
               <span class="text-base-content/60">
-                — {Decimal.to_string(line.quantity)} {line.output_unit}
+                — {qty(line.quantity)} {line.output_unit}
               </span>
               <span class={["badge badge-sm ml-2", step_status_class(Orders.line_status(line))]}>
                 {status_label(Orders.line_status(line))}
@@ -125,7 +132,7 @@ defmodule ProductionflowWeb.Orders.OrderLive.Show do
                 )}
               </span>
               <.link
-                :if={@can_manage and @order.status == :draft}
+                :if={@can_edit}
                 phx-click="delete_line"
                 phx-value-id={line.id}
                 data-confirm={gettext("Remove this line?")}
@@ -178,7 +185,7 @@ defmodule ProductionflowWeb.Orders.OrderLive.Show do
                   </.button>
                 </span>
                 <.link
-                  :if={@can_manage and @order.status == :draft and OrderLine.ad_hoc?(line)}
+                  :if={@can_edit and OrderLine.ad_hoc?(line)}
                   phx-click="delete_line_step"
                   phx-value-id={step.id}
                   data-confirm={gettext("Delete this step?")}
@@ -197,11 +204,11 @@ defmodule ProductionflowWeb.Orders.OrderLive.Show do
             <ul class="text-sm text-base-content/70">
               <li :for={mat <- line.materials} class="flex items-center gap-2">
                 <span>
-                  {mat.material_name} — {Decimal.to_string(mat.quantity)} {mat.unit} ({money(mat.cost)})
+                  {mat.material_name} — {qty(mat.quantity)} {mat.unit} ({money(mat.cost)})
                 </span>
                 <span :if={mat.consumed_at} class="text-success">· {gettext("consumed")}</span>
                 <.link
-                  :if={@can_manage and @order.status == :draft and OrderLine.ad_hoc?(line)}
+                  :if={@can_edit and OrderLine.ad_hoc?(line)}
                   phx-click="delete_line_material"
                   phx-value-id={mat.id}
                   data-confirm={gettext("Delete this material?")}
@@ -214,7 +221,7 @@ defmodule ProductionflowWeb.Orders.OrderLive.Show do
           </div>
 
           <div
-            :if={@can_manage and @order.status == :draft and OrderLine.ad_hoc?(line)}
+            :if={@can_edit and OrderLine.ad_hoc?(line)}
             class="mt-3 space-y-2 border-t border-base-200 pt-3"
           >
             <.form
@@ -268,7 +275,7 @@ defmodule ProductionflowWeb.Orders.OrderLive.Show do
           </div>
 
           <.form
-            :if={@can_manage and @order.status == :draft and other_lines(@order, line) != []}
+            :if={@can_edit and other_lines(@order, line) != []}
             for={%{}}
             id={"deps-#{line.id}"}
             phx-submit="set_dependencies"
@@ -294,7 +301,7 @@ defmodule ProductionflowWeb.Orders.OrderLive.Show do
         </div>
 
         <.form
-          :if={@can_manage and @order.status == :draft}
+          :if={@can_edit}
           for={%{}}
           id="add-line-form"
           phx-submit="add_line"
@@ -324,7 +331,7 @@ defmodule ProductionflowWeb.Orders.OrderLive.Show do
         </.form>
 
         <.form
-          :if={@can_manage and @order.status == :draft}
+          :if={@can_edit}
           for={%{}}
           id="add-custom-line-form"
           phx-submit="add_blank_line"
@@ -356,6 +363,92 @@ defmodule ProductionflowWeb.Orders.OrderLive.Show do
           />
           <div class="sm:col-span-4">
             <.button phx-disable-with={gettext("Adding...")}>{gettext("Add custom line")}</.button>
+          </div>
+        </.form>
+      </section>
+
+      <section class="rounded-xl border border-base-300 bg-base-100 p-6">
+        <h2 class="mb-3 text-base font-semibold">{gettext("Deliveries")}</h2>
+
+        <p :if={@order.deliveries == []} class="text-sm text-base-content/60">
+          {gettext("No delivery addresses yet.")}
+        </p>
+
+        <div :for={delivery <- @order.deliveries} class="mb-4 rounded-lg border border-base-200 p-4">
+          <div class="flex items-start justify-between gap-4">
+            <div class="text-sm">
+              <div class="font-medium">{format_address(delivery)}</div>
+              <div :if={delivery.planned_date} class="text-base-content/60">
+                {gettext("Planned")}: {delivery.planned_date}
+              </div>
+            </div>
+            <.link
+              :if={@can_edit}
+              phx-click="delete_delivery"
+              phx-value-id={delivery.id}
+              data-confirm={gettext("Remove this delivery?")}
+              class="text-sm text-error"
+            >
+              {gettext("Remove")}
+            </.link>
+          </div>
+
+          <.form
+            :if={delivery.items != []}
+            for={%{}}
+            id={"delivery-items-#{delivery.id}"}
+            phx-submit="save_delivery_items"
+            class="mt-3 space-y-1"
+          >
+            <div :for={item <- delivery.items} class="flex items-center gap-2 text-sm">
+              <span class="flex-1">{line_description(@order, item.order_line_id)}</span>
+              <input
+                :if={@can_edit}
+                type="number"
+                step="any"
+                min="0"
+                name={"items[#{item.id}]"}
+                value={qty(item.quantity)}
+                class="input input-sm w-28"
+              />
+              <span :if={not @can_edit}>
+                {qty(item.quantity)}
+              </span>
+            </div>
+            <.button :if={@can_edit} class="mt-1">
+              {gettext("Save quantities")}
+            </.button>
+          </.form>
+        </div>
+
+        <.form
+          :if={@can_edit}
+          for={%{}}
+          id="add-delivery-form"
+          phx-submit="add_delivery"
+          class="mt-2 grid items-end gap-3 border-t border-base-200 pt-3 sm:grid-cols-3"
+        >
+          <.input
+            :if={@address_options != []}
+            name="address_id"
+            value=""
+            type="select"
+            label={gettext("Customer address")}
+            prompt={gettext("— or type a new one below —")}
+            options={@address_options}
+          />
+          <.input name="street" value="" type="text" label={gettext("Street")} />
+          <.input name="postal_code" value="" type="text" label={gettext("Postal code")} />
+          <.input name="city" value="" type="text" label={gettext("City")} />
+          <.input name="country" value="" type="text" label={gettext("Country")} />
+          <.input name="planned_date" value="" type="date" label={gettext("Planned date")} />
+          <label class="flex items-center gap-2 text-sm">
+            <input type="hidden" name="save_to_customer" value="false" />
+            <input type="checkbox" name="save_to_customer" value="true" class="checkbox checkbox-sm" />
+            {gettext("Save address to customer")}
+          </label>
+          <div class="sm:col-span-3">
+            <.button phx-disable-with={gettext("Adding...")}>{gettext("Add delivery")}</.button>
           </div>
         </.form>
       </section>
@@ -521,6 +614,38 @@ defmodule ProductionflowWeb.Orders.OrderLive.Show do
     end)
   end
 
+  def handle_event("add_delivery", params, socket) do
+    authorize(socket, fn ->
+      case Orders.add_delivery(socket.assigns.order, params) do
+        {:ok, _} ->
+          {:noreply, reload(socket, gettext("Delivery added."))}
+
+        {:error, _} ->
+          {:noreply,
+           put_flash(socket, :error, gettext("Pick an address or enter a street and city."))}
+      end
+    end)
+  end
+
+  def handle_event("delete_delivery", %{"id" => id}, socket) do
+    authorize(socket, fn ->
+      case Orders.get_delivery!(id) |> Orders.delete_delivery() do
+        {:ok, _} -> {:noreply, reload(socket, gettext("Delivery removed."))}
+        {:error, _} -> {:noreply, put_flash(socket, :error, gettext("Could not remove it."))}
+      end
+    end)
+  end
+
+  def handle_event("save_delivery_items", %{"items" => items}, socket) do
+    authorize(socket, fn ->
+      Enum.each(items, fn {item_id, quantity} ->
+        Orders.get_delivery_item!(item_id) |> Orders.update_delivery_item(quantity)
+      end)
+
+      {:noreply, reload(socket, gettext("Quantities saved."))}
+    end)
+  end
+
   defp authorize(socket, fun) do
     if socket.assigns.can_manage,
       do: fun.(),
@@ -554,4 +679,22 @@ defmodule ProductionflowWeb.Orders.OrderLive.Show do
     do: Enum.map(deps, & &1.id)
 
   defp dependency_ids(_line), do: []
+
+  defp format_address(%{street: street, postal_code: postal, city: city, country: country}) do
+    [street, [postal, city] |> Enum.reject(&blank?/1) |> Enum.join(" "), country]
+    |> Enum.reject(&blank?/1)
+    |> Enum.join(", ")
+  end
+
+  defp blank?(value), do: value in [nil, ""]
+
+  # Trims trailing decimals so whole quantities show as "334", not "334.0000".
+  defp qty(%Decimal{} = d), do: Decimal.to_string(Decimal.normalize(d), :normal)
+
+  defp line_description(order, line_id) do
+    case Enum.find(order.lines, &(&1.id == line_id)) do
+      nil -> gettext("Line")
+      line -> line.description
+    end
+  end
 end

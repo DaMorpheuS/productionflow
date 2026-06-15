@@ -83,8 +83,8 @@ defmodule ProductionflowWeb.Orders.OrderLive.Form do
       {:ok, order} ->
         saved(socket, order, gettext("Order updated."))
 
-      {:error, :not_draft} ->
-        {:noreply, put_flash(socket, :error, gettext("Only draft orders can be edited."))}
+      {:error, :not_editable} ->
+        {:noreply, put_flash(socket, :error, gettext("This order can no longer be edited."))}
 
       {:error, changeset} ->
         {:noreply, assign_form(socket, changeset)}

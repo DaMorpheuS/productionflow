@@ -7,7 +7,7 @@ defmodule Productionflow.OrdersTest do
   import Productionflow.CRMFixtures
   import Productionflow.OrdersFixtures
 
-  alias Productionflow.{Orders, Inventory}
+  alias Productionflow.{Orders, Inventory, CRM}
   alias Productionflow.Orders.Order
 
   # A template costing €1.05/unit at qty 100: a €5/hour machine doing 1 hour, plus
@@ -92,7 +92,7 @@ defmodule Productionflow.OrdersTest do
 
     test "is rejected once the order leaves draft", %{template: template} do
       order = order_fixture() |> confirmed_in_production()
-      assert {:error, :not_draft} = Orders.add_line_from_template(order, template.id, "100")
+      assert {:error, :not_editable} = Orders.add_line_from_template(order, template.id, "100")
     end
   end
 
@@ -114,11 +114,15 @@ defmodule Productionflow.OrdersTest do
       assert {:ok, %Order{status: :cancelled}} = Orders.cancel_order(order)
     end
 
-    test "update_order only works while draft" do
+    test "update_order works while draft or confirmed, not once in production" do
       order = order_fixture()
       assert {:ok, _} = Orders.update_order(order, %{reference: "PO-1"})
+
       {:ok, order} = Orders.transition_order(order, :confirmed)
-      assert {:error, :not_draft} = Orders.update_order(order, %{reference: "PO-2"})
+      assert {:ok, _} = Orders.update_order(order, %{reference: "PO-2"})
+
+      {:ok, order} = Orders.transition_order(order, :in_production)
+      assert {:error, :not_editable} = Orders.update_order(order, %{reference: "PO-3"})
     end
   end
 
@@ -220,7 +224,7 @@ defmodule Productionflow.OrdersTest do
 
       {:ok, line2} = Orders.add_line_from_template(order, template.id, "100")
       confirmed_in_production(order)
-      assert {:error, :not_draft} = Orders.delete_line(Orders.get_line!(line2.id))
+      assert {:error, :not_editable} = Orders.delete_line(Orders.get_line!(line2.id))
     end
   end
 
@@ -344,7 +348,119 @@ defmodule Productionflow.OrdersTest do
       {:ok, b} = Orders.add_line_from_template(order, template.id, "100")
       confirmed_in_production(order)
 
-      assert {:error, :not_draft} = Orders.set_line_dependencies(Orders.get_line!(b.id), [a.id])
+      assert {:error, :not_editable} =
+               Orders.set_line_dependencies(Orders.get_line!(b.id), [a.id])
+    end
+  end
+
+  describe "editable window" do
+    setup :priced_setup
+
+    test "lines can still be added while confirmed", %{template: template} do
+      order = order_fixture()
+      {:ok, order} = Orders.transition_order(order, :confirmed)
+      assert {:ok, _} = Orders.add_line_from_template(order, template.id, "100")
+    end
+  end
+
+  describe "deliveries" do
+    setup :priced_setup
+
+    defp order_with_line(template) do
+      relation = relation_fixture()
+      order = order_fixture(relation)
+      {:ok, line} = Orders.add_line_from_template(order, template.id, "1000")
+      %{order: order, line: line, relation: relation}
+    end
+
+    defp line_allocations(order_id, line_id) do
+      Orders.get_order!(order_id).deliveries
+      |> Enum.flat_map(& &1.items)
+      |> Enum.filter(&(&1.order_line_id == line_id))
+    end
+
+    test "two deliveries split a line equally and sum to its quantity", %{template: template} do
+      %{order: order, line: line} = order_with_line(template)
+
+      {:ok, _} = Orders.add_delivery(order, %{"street" => "A 1", "city" => "Amsterdam"})
+      {:ok, _} = Orders.add_delivery(order, %{"street" => "B 2", "city" => "Rotterdam"})
+
+      items = line_allocations(order.id, line.id)
+      assert length(items) == 2
+      assert Enum.all?(items, &Decimal.equal?(&1.quantity, Decimal.new("500")))
+
+      sum = Enum.reduce(items, Decimal.new(0), &Decimal.add(&2, &1.quantity))
+      assert Decimal.equal?(sum, Decimal.new("1000"))
+    end
+
+    test "splits into whole numbers, leftover going onto one address", %{template: template} do
+      %{order: order, line: line} = order_with_line(template)
+
+      for s <- ["A", "B", "C"], do: Orders.add_delivery(order, %{"street" => s, "city" => "X"})
+
+      qtys = line_allocations(order.id, line.id) |> Enum.map(& &1.quantity)
+      # 1000 over 3 → 334 / 333 / 333, all whole, summing to 1000
+      assert Enum.all?(qtys, &(Decimal.round(&1, 0) |> Decimal.equal?(&1)))
+
+      assert Enum.sort(Enum.map(qtys, &Decimal.to_integer(Decimal.round(&1, 0)))) == [
+               333,
+               333,
+               334
+             ]
+    end
+
+    test "removing a delivery re-divides across the rest", %{template: template} do
+      %{order: order, line: line} = order_with_line(template)
+      {:ok, d1} = Orders.add_delivery(order, %{"street" => "A 1", "city" => "Amsterdam"})
+      {:ok, _} = Orders.add_delivery(order, %{"street" => "B 2", "city" => "Rotterdam"})
+
+      {:ok, _} = Orders.delete_delivery(d1)
+      items = line_allocations(order.id, line.id)
+      assert length(items) == 1
+      assert Decimal.equal?(hd(items).quantity, Decimal.new("1000"))
+    end
+
+    test "a delivery can use a saved customer address", %{template: template} do
+      %{order: order, relation: relation} = order_with_line(template)
+
+      {:ok, address} =
+        CRM.create_address(relation, %{kind: :delivery, street: "Saved 9", city: "Utrecht"})
+
+      {:ok, _} = Orders.add_delivery(order, %{"address_id" => address.id})
+      delivery = Orders.get_order!(order.id).deliveries |> hd()
+      assert delivery.street == "Saved 9"
+      assert delivery.address_id == address.id
+    end
+
+    test "a one-off address can be saved onto the customer", %{template: template} do
+      %{order: order, relation: relation} = order_with_line(template)
+
+      {:ok, _} =
+        Orders.add_delivery(order, %{
+          "street" => "New 5",
+          "city" => "Eindhoven",
+          "save_to_customer" => "true"
+        })
+
+      assert Enum.any?(CRM.get_relation!(relation.id).addresses, &(&1.street == "New 5"))
+    end
+
+    test "a manual allocation overrides the equal split", %{template: template} do
+      %{order: order, line: line} = order_with_line(template)
+      {:ok, _} = Orders.add_delivery(order, %{"street" => "A 1", "city" => "Amsterdam"})
+      {:ok, _} = Orders.add_delivery(order, %{"street" => "B 2", "city" => "Rotterdam"})
+
+      item = line_allocations(order.id, line.id) |> hd()
+      assert {:ok, updated} = Orders.update_delivery_item(item, "600")
+      assert Decimal.equal?(updated.quantity, Decimal.new("600"))
+    end
+
+    test "deliveries cannot be added once in production", %{template: template} do
+      %{order: order} = order_with_line(template)
+      confirmed_in_production(order)
+
+      assert {:error, :not_editable} =
+               Orders.add_delivery(order, %{"street" => "X", "city" => "Y"})
     end
   end
 end

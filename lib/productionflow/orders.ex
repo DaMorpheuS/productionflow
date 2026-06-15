@@ -18,13 +18,15 @@ defmodule Productionflow.Orders do
 
   import Ecto.Query, warn: false
   alias Productionflow.Repo
-  alias Productionflow.{Catalog, Pricing, Inventory, Production}
+  alias Productionflow.{Catalog, Pricing, Inventory, Production, CRM}
 
   alias Productionflow.Orders.{
     Order,
     OrderLine,
     OrderRouteStep,
     OrderLineMaterial,
+    OrderDelivery,
+    OrderDeliveryItem,
     Settings,
     NumberCounter
   }
@@ -90,10 +92,16 @@ defmodule Productionflow.Orders do
   def get_order!(id) do
     Order
     |> Repo.get!(id)
-    |> Repo.preload([:relation, lines: line_preloads()])
+    |> Repo.preload([:relation, {:deliveries, deliveries_preload()}, lines: line_preloads()])
   end
 
   defp line_preloads, do: [:route_steps, :materials, depends_on: :route_steps]
+
+  defp deliveries_preload do
+    items = from(i in OrderDeliveryItem, order_by: [asc: i.order_line_id])
+    deliveries = from(d in OrderDelivery, order_by: [asc: d.position, asc: d.id])
+    {deliveries, [items: items]}
+  end
 
   @doc "Returns a changeset for an order's editable fields."
   def change_order(%Order{} = order, attrs \\ %{}), do: Order.changeset(order, attrs)
@@ -115,11 +123,11 @@ defmodule Productionflow.Orders do
     end)
   end
 
-  @doc "Updates an order's editable fields (only while it is still a draft)."
-  def update_order(%Order{status: :draft} = order, attrs),
+  @doc "Updates an order's editable fields (while draft or confirmed)."
+  def update_order(%Order{status: status} = order, attrs) when status in [:draft, :confirmed],
     do: order |> Order.changeset(attrs) |> Repo.update()
 
-  def update_order(%Order{}, _attrs), do: {:error, :not_draft}
+  def update_order(%Order{}, _attrs), do: {:error, :not_editable}
 
   ## Numbering
 
@@ -170,7 +178,8 @@ defmodule Productionflow.Orders do
   customer price/cost/margin and copies the route + bill of materials. Only
   allowed while the order is a draft.
   """
-  def add_line_from_template(%Order{status: :draft} = order, template_id, quantity) do
+  def add_line_from_template(%Order{status: status} = order, template_id, quantity)
+      when status in [:draft, :confirmed] do
     template = Catalog.get_product_template!(template_id)
     order = Repo.preload(order, :relation)
     quote = Pricing.quote(template, quantity, relation: order.relation)
@@ -179,11 +188,13 @@ defmodule Productionflow.Orders do
       line = insert_line_from_quote(order, template, quote)
       copy_route_steps(line, quote.estimate.steps)
       copy_materials(line, quote.estimate.materials)
+      line = get_line!(line.id)
+      rebalance_line(line, order_deliveries(order.id))
       {:ok, get_line!(line.id)}
     end)
   end
 
-  def add_line_from_template(%Order{}, _template_id, _quantity), do: {:error, :not_draft}
+  def add_line_from_template(%Order{}, _template_id, _quantity), do: {:error, :not_editable}
 
   defp insert_line_from_quote(order, template, quote) do
     %OrderLine{
@@ -238,11 +249,11 @@ defmodule Productionflow.Orders do
     end)
   end
 
-  @doc "Deletes a line (only while the order is a draft)."
+  @doc "Deletes a line (while the order is editable). Its delivery items cascade."
   def delete_line(%OrderLine{} = line) do
-    if draft_order?(line.order_id),
+    if editable_order?(line.order_id),
       do: Repo.delete(line),
-      else: {:error, :not_draft}
+      else: {:error, :not_editable}
   end
 
   defp next_line_position(order) do
@@ -252,8 +263,8 @@ defmodule Productionflow.Orders do
     (max || -1) + 1
   end
 
-  defp draft_order?(order_id) do
-    Repo.one(from o in Order, where: o.id == ^order_id, select: o.status) == :draft
+  defp editable_order?(order_id) do
+    Repo.one(from o in Order, where: o.id == ^order_id, select: o.status) in [:draft, :confirmed]
   end
 
   ## Ad-hoc lines (built from scratch, not from a template)
@@ -266,7 +277,8 @@ defmodule Productionflow.Orders do
   `unit_price` makes the price manual; otherwise it is calculated from the line's
   route + materials cost plus the default margin as those are added.
   """
-  def add_blank_line(%Order{status: :draft} = order, attrs) do
+  def add_blank_line(%Order{status: status} = order, attrs)
+      when status in [:draft, :confirmed] do
     manual = parse_decimal(attrs["unit_price"])
 
     %OrderLine{
@@ -280,7 +292,7 @@ defmodule Productionflow.Orders do
     |> recalc_after()
   end
 
-  def add_blank_line(%Order{}, _attrs), do: {:error, :not_draft}
+  def add_blank_line(%Order{}, _attrs), do: {:error, :not_editable}
 
   @doc "Updates an ad-hoc line's fields (description, quantity, output unit, manual price)."
   def update_line(%OrderLine{} = line, attrs) do
@@ -403,7 +415,7 @@ defmodule Productionflow.Orders do
   defp ensure_editable(%OrderLine{} = line) do
     cond do
       not OrderLine.ad_hoc?(line) -> {:error, :not_ad_hoc}
-      not draft_order?(line.order_id) -> {:error, :not_draft}
+      not editable_order?(line.order_id) -> {:error, :not_editable}
       true -> :ok
     end
   end
@@ -488,10 +500,10 @@ defmodule Productionflow.Orders do
 
   @doc """
   Replaces a line's dependencies with the given line ids (same order only; self
-  and blanks ignored). Only while the order is a draft.
+  and blanks ignored). Only while the order is editable.
   """
   def set_line_dependencies(%OrderLine{} = line, depends_on_ids) do
-    if draft_order?(line.order_id) do
+    if editable_order?(line.order_id) do
       ids =
         depends_on_ids
         |> List.wrap()
@@ -507,13 +519,180 @@ defmodule Productionflow.Orders do
       |> Ecto.Changeset.put_assoc(:depends_on, deps)
       |> Repo.update()
     else
-      {:error, :not_draft}
+      {:error, :not_editable}
+    end
+  end
+
+  ## Deliveries
+
+  @doc "Lists an order's deliveries, in order."
+  def order_deliveries(order_id) do
+    Repo.all(
+      from d in OrderDelivery,
+        where: d.order_id == ^order_id,
+        order_by: [asc: d.position, asc: d.id]
+    )
+  end
+
+  @doc "Gets a delivery."
+  def get_delivery!(id), do: Repo.get!(OrderDelivery, id)
+
+  @doc "Gets a delivery item (a line's allocation to a delivery)."
+  def get_delivery_item!(id), do: Repo.get!(OrderDeliveryItem, id)
+
+  @doc """
+  Adds a delivery destination to an editable order. The address comes from a
+  chosen customer address (`address_id`) or one-off fields; a one-off can also be
+  saved onto the customer (`save_to_customer`). Lines are then auto-divided
+  equally across all deliveries.
+  """
+  def add_delivery(%Order{} = order, attrs) do
+    if editable_order?(order.id) do
+      order = Repo.preload(order, :relation)
+
+      Repo.transact(fn ->
+        with {:ok, snapshot} <- resolve_delivery_attrs(order, attrs),
+             {:ok, delivery} <-
+               %OrderDelivery{order_id: order.id, position: next_delivery_position(order.id)}
+               |> OrderDelivery.changeset(snapshot)
+               |> Repo.insert() do
+          rebalance_all_lines(order.id)
+          {:ok, delivery}
+        end
+      end)
+    else
+      {:error, :not_editable}
+    end
+  end
+
+  @doc "Removes a delivery and re-divides the lines across the remaining ones."
+  def delete_delivery(%OrderDelivery{} = delivery) do
+    if editable_order?(delivery.order_id) do
+      Repo.delete(delivery)
+      rebalance_all_lines(delivery.order_id)
+      {:ok, delivery}
+    else
+      {:error, :not_editable}
+    end
+  end
+
+  @doc "Sets a single allocation quantity manually (persists until the next rebalance)."
+  def update_delivery_item(%OrderDeliveryItem{} = item, quantity) do
+    if editable_order?(order_id_for_item(item)) do
+      item |> OrderDeliveryItem.changeset(%{"quantity" => quantity}) |> Repo.update()
+    else
+      {:error, :not_editable}
+    end
+  end
+
+  # Resolves the address into delivery attrs, optionally saving a one-off onto the
+  # customer.
+  defp resolve_delivery_attrs(order, attrs) do
+    case blank_to_nil(attrs["address_id"]) do
+      nil ->
+        resolve_one_off(order, attrs)
+
+      address_id ->
+        address = CRM.get_address!(address_id)
+
+        {:ok,
+         %{
+           "address_id" => address.id,
+           "street" => address.street,
+           "postal_code" => address.postal_code,
+           "city" => address.city,
+           "country" => address.country,
+           "planned_date" => attrs["planned_date"]
+         }}
+    end
+  end
+
+  defp resolve_one_off(order, attrs) do
+    base = Map.take(attrs, ["street", "postal_code", "city", "country", "planned_date"])
+
+    if truthy(attrs["save_to_customer"]) do
+      case CRM.create_address(order.relation, %{
+             kind: :delivery,
+             street: attrs["street"],
+             postal_code: attrs["postal_code"],
+             city: attrs["city"],
+             country: attrs["country"]
+           }) do
+        {:ok, address} -> {:ok, Map.put(base, "address_id", address.id)}
+        {:error, changeset} -> {:error, changeset}
+      end
+    else
+      {:ok, base}
+    end
+  end
+
+  defp next_delivery_position(order_id) do
+    max =
+      from(d in OrderDelivery, where: d.order_id == ^order_id, select: max(d.position))
+      |> Repo.one()
+
+    (max || -1) + 1
+  end
+
+  defp order_id_for_item(item) do
+    Repo.one(
+      from d in OrderDelivery,
+        join: i in OrderDeliveryItem,
+        on: i.order_delivery_id == d.id,
+        where: i.id == ^item.id,
+        select: d.order_id
+    )
+  end
+
+  # Re-divides every line of the order equally across its deliveries.
+  defp rebalance_all_lines(order_id) do
+    deliveries = order_deliveries(order_id)
+    lines = Repo.all(from l in OrderLine, where: l.order_id == ^order_id)
+    Enum.each(lines, &rebalance_line(&1, deliveries))
+  end
+
+  # Replaces a line's allocations with a split across `deliveries`. Items are not
+  # divisible, so each part is a whole number: any whole remainder is spread one
+  # extra per delivery across the first few; only a genuinely fractional quantity
+  # (e.g. m²) leaves a fractional rest, placed on the first delivery. The parts
+  # always sum exactly to the line quantity.
+  defp rebalance_line(_line, []), do: :ok
+
+  defp rebalance_line(line, deliveries) do
+    Repo.delete_all(from i in OrderDeliveryItem, where: i.order_line_id == ^line.id)
+
+    deliveries
+    |> Enum.zip(whole_division(line.quantity, length(deliveries)))
+    |> Enum.each(fn {delivery, amount} ->
+      Repo.insert!(%OrderDeliveryItem{
+        order_delivery_id: delivery.id,
+        order_line_id: line.id,
+        quantity: amount
+      })
+    end)
+  end
+
+  defp whole_division(qty, n) do
+    base = qty |> Decimal.div(n) |> Decimal.round(0, :down)
+    remainder = Decimal.sub(qty, Decimal.mult(base, n))
+    whole_remainder = Decimal.round(remainder, 0, :down)
+    frac = Decimal.sub(remainder, whole_remainder)
+    extra = Decimal.to_integer(whole_remainder)
+
+    for i <- 0..(n - 1) do
+      amount = if i < extra, do: Decimal.add(base, 1), else: base
+      if i == 0 and Decimal.compare(frac, 0) == :gt, do: Decimal.add(amount, frac), else: amount
     end
   end
 
   ## Shared helpers
 
-  defp recalc_after({:ok, line}), do: {:ok, recalculate_line!(get_line!(line.id))}
+  defp recalc_after({:ok, line}) do
+    line = recalculate_line!(get_line!(line.id))
+    rebalance_line(line, order_deliveries(line.order_id))
+    {:ok, get_line!(line.id)}
+  end
+
   defp recalc_after(error), do: error
 
   defp recalc_line_after({:ok, _child}, line),
@@ -534,6 +713,11 @@ defmodule Productionflow.Orders do
 
   defp to_int(value) when is_integer(value), do: value
   defp to_int(value) when is_binary(value), do: String.to_integer(value)
+
+  defp blank_to_nil(value) when value in [nil, ""], do: nil
+  defp blank_to_nil(value), do: value
+
+  defp truthy(value), do: value in [true, "true", "on"]
 
   ## Lifecycle
 
