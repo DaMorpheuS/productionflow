@@ -36,7 +36,9 @@ milestones**. Each milestone is fully tested and ends in its own commit.
 | M5a | Catalog — product templates (production route + bill of materials) + cost/time preview | ✅ Done |
 | M5b | Pricing — customer price (margin) + price lists + quote view | ✅ Done |
 | M6 | Orders — orders, lines, per-line production routes, lifecycle, stock consumption | ⬜ Planned |
-| M7 | Hardening & dashboard — overview, search, demo data | ⬜ Planned |
+| M7 | Quotes — saved multi-line quotes for a customer, lifecycle, validity, price/cost/margin snapshots, convert to order | ⬜ Planned |
+| M8 | Planning — scheduling board: order route steps onto machines over time, per-machine queues, due dates | ⬜ Planned |
+| M9 | Hardening & dashboard — overview, search, demo data | ⬜ Planned |
 
 ---
 

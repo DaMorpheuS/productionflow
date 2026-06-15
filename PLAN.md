@@ -24,8 +24,10 @@ Dependency order: auth gates everything → relations are standalone and prove t
 3. **M3 — Production resources**: `Production` context — process types + parameter definitions, machines + parameter values, hourly rates, power draw, labor rates, energy tariff; time-calculation engine with unit tests.
 4. **M4 — Materials & inventory**: `Inventory` context — materials with prices/units, stock via movement ledger (purchase/consumption/adjustment), manual booking UI.
 5. **M5 — Catalog & pricing**: `Catalog` (product templates = saved routes + bill of materials) and `Pricing` (cost build-up calculator with breakdown struct, price lists with quantity tiers, override resolution).
-6. **M6 — Orders**: `Orders` context — orders, order lines (from template or one-off), per-line route steps with statuses, lifecycle with guarded transitions, price snapshots, stock consumption on completion. MVP finish line.
-7. **M7 — Hardening/dashboard** (stretch): overview dashboard, search/filters, demo seed data. Later: planning/scheduling, quotes & invoicing, customer portal, documents, per-customer price lists.
+6. **M6 — Orders**: `Orders` context — orders, order lines (from template or one-off), per-line route steps with statuses, lifecycle with guarded transitions, price snapshots, stock consumption on completion. MVP finish line. Builds the shared line-item + price/cost/margin snapshot machinery that M7 quotes reuse.
+7. **M7 — Quotes**: saved quotes for a relation — a `Quotes`/`Sales` context with persisted `Quote` + `QuoteLine` (distinct from the ephemeral `Pricing.Quote` calculator). Full first version: multi-line (products × quantity), per-line price/cost/margin snapshots via `Pricing.quote/3`, quote-level totals, a status lifecycle (draft → sent → accepted/rejected/expired) with guarded transitions, and a validity-until date. Reuses the line/snapshot pattern from M6; an accepted quote can convert into an order. Print/PDF later. *(Decided 2026-06-15: orders before quotes, full quote scope.)*
+8. **M8 — Planning**: production scheduling board — schedule each order's route steps onto machines over time. A `Planning`/`Scheduling` context placing route steps into per-machine queues/calendar with sequencing (drag-and-drop reorder), durations from `Production.estimate`, against due dates and machine working hours/capacity. Consumes M6 order route steps; step start/done feeds their statuses. Capacity warnings and a board UI; Gantt/finite-capacity refinements later. *(Decided 2026-06-15: own milestone, after quotes; first version = scheduling board jobs→machines→time.)*
+9. **M9 — Hardening/dashboard** (stretch): overview dashboard, search/filters, demo seed data. Later: invoicing, customer portal, documents, per-customer price lists.
 
 ## Context Architecture
 
@@ -38,8 +40,10 @@ Dependency order: auth gates everything → relations are standalone and prove t
 | `Catalog` | ProductTemplate, TemplateRouteStep, TemplateMaterial (references other contexts by id) |
 | `Pricing` | PriceList, PriceListItem, pure `Calculator`, non-persisted `Quote` struct |
 | `Orders` | Order, OrderLine, OrderRouteStep, OrderLineMaterial (snapshots from Catalog/Pricing) |
+| `Quotes` (M7) | Quote, QuoteLine (price/cost/margin snapshots from `Pricing.quote/3`); accepted quote → Order |
+| `Planning` (M8) | scheduled slots placing `Orders` route steps onto machines over time (durations from `Production.estimate`) |
 
-Rules: contexts call each other's public functions only; orders snapshot prices/parameters rather than joining live data.
+Rules: contexts call each other's public functions only; orders and quotes snapshot prices/parameters rather than joining live data.
 
 ## Key Design Decisions
 
