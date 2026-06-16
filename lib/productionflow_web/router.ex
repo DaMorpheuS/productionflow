@@ -258,6 +258,7 @@ defmodule ProductionflowWeb.Router do
       on_mount: [{ProductionflowWeb.UserAuth, :mount_current_scope}] do
       live "/users/log-in", UserLive.Login, :new
       live "/users/log-in/:token", UserLive.Confirmation, :new
+      live "/quote/:token", QuoteLive, :show
     end
 
     post "/users/log-in", UserSessionController, :create

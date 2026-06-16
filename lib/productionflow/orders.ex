@@ -30,9 +30,13 @@ defmodule Productionflow.Orders do
     OrderLineMaterial,
     OrderDelivery,
     OrderDeliveryItem,
+    OrderToken,
+    OrderNotifier,
     Settings,
     NumberCounter
   }
+
+  @quote_token_context "quote"
 
   ## Settings (singleton)
 
@@ -809,6 +813,48 @@ defmodule Productionflow.Orders do
   end
 
   def archive_order(%Order{}, _reason), do: {:error, :not_archivable}
+
+  ## Quote delivery (email + public accept/decline link)
+
+  @doc """
+  Sends a quote to the customer: emails the accept/decline link (built by
+  `url_fun.(token)`) and marks the quote `:sent`. Needs the customer's email and
+  a quote that can still be sent.
+  """
+  def send_quote(%Order{} = order, url_fun) when is_function(url_fun, 1) do
+    order = Repo.preload(order, :relation)
+    email = order.relation.email
+
+    cond do
+      email in [nil, ""] ->
+        {:error, :no_email}
+
+      :sent not in Order.next_statuses(order.status) ->
+        {:error, :not_sendable}
+
+      true ->
+        Repo.transact(fn ->
+          {encoded, token} = OrderToken.build_token(order, @quote_token_context, email)
+          Repo.insert!(token)
+          OrderNotifier.deliver_quote(order, email, url_fun.(encoded))
+          Order.transition_changeset(order, :sent) |> Repo.update()
+        end)
+    end
+  end
+
+  @doc "Loads the quote for a valid accept/decline token, with all its detail. Nil if invalid/expired."
+  def get_quote_by_token(token) do
+    with {:ok, query} <- OrderToken.verify_token_query(token, @quote_token_context),
+         %Order{} = order <- Repo.one(query) do
+      get_order!(order.id)
+    else
+      _ -> nil
+    end
+  end
+
+  @doc "Deletes a document's quote tokens (call once it has been accepted/declined)."
+  def consume_quote_tokens(%Order{} = order),
+    do: Repo.delete_all(from t in OrderToken, where: t.order_id == ^order.id)
 
   @doc """
   Completes an order: requires it to be in production with every route step done,

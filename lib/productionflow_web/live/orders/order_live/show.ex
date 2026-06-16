@@ -424,12 +424,15 @@ defmodule ProductionflowWeb.Orders.OrderLive.Show do
 
   def handle_event("send", _params, socket) do
     authorize(socket, fn ->
-      case Orders.transition_order(socket.assigns.order, :sent) do
+      case Orders.send_quote(socket.assigns.order, &url(~p"/quote/#{&1}")) do
         {:ok, _} ->
-          {:noreply, reload(socket, gettext("Quote marked as sent."))}
+          {:noreply, reload(socket, gettext("Quote emailed to the customer."))}
+
+        {:error, :no_email} ->
+          {:noreply, put_flash(socket, :error, gettext("The customer has no email address."))}
 
         {:error, _} ->
-          {:noreply, put_flash(socket, :error, gettext("That change is not allowed."))}
+          {:noreply, put_flash(socket, :error, gettext("Could not send the quote."))}
       end
     end)
   end

@@ -169,6 +169,47 @@ defmodule Productionflow.OrdersTest do
     end
   end
 
+  describe "quote delivery (email + token)" do
+    defp send_capturing_token(order) do
+      {:ok, _} =
+        Orders.send_quote(order, fn t ->
+          send(self(), {:token, t})
+          "http://x/quote/#{t}"
+        end)
+
+      assert_received {:token, token}
+      token
+    end
+
+    test "send_quote emails the customer and marks the quote sent" do
+      order = order_fixture(relation_fixture(%{email: "buyer@example.com"}))
+      assert {:ok, _} = Orders.send_quote(order, fn t -> "http://x/quote/#{t}" end)
+      assert Orders.get_order!(order.id).status == :sent
+    end
+
+    test "send_quote needs a customer email" do
+      order = order_fixture(relation_fixture(%{email: nil}))
+      assert {:error, :no_email} = Orders.send_quote(order, fn t -> t end)
+    end
+
+    test "a sent quote is loadable and acceptable by its token, then consumed" do
+      order = order_fixture(relation_fixture(%{email: "b@example.com"}))
+      token = send_capturing_token(order)
+
+      loaded = Orders.get_quote_by_token(token)
+      assert loaded.id == order.id
+
+      assert {:ok, accepted} = Orders.accept_quote(loaded)
+      assert accepted.status == :accepted
+      Orders.consume_quote_tokens(accepted)
+      assert Orders.get_quote_by_token(token) == nil
+    end
+
+    test "an invalid token returns nil" do
+      assert Orders.get_quote_by_token("not-a-token") == nil
+    end
+  end
+
   describe "route steps & completion" do
     setup :priced_setup
 

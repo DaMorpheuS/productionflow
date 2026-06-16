@@ -36,7 +36,7 @@ milestones**. Each milestone is fully tested and ends in its own commit.
 | M5a | Catalog — product templates (production route + bill of materials) + cost/time preview | ✅ Done |
 | M5b | Pricing — customer price (margin) + price lists + quote view | ✅ Done |
 | M6 | Orders — orders, lines, per-line production routes, lifecycle, stock consumption | ✅ Done |
-| M7 | Quotes — a quote is an order in a pre-acceptance stage; send by email, customer accepts/declines, decline/revise/archive | 🔨 In progress |
+| M7 | Quotes — a quote is an order in a pre-acceptance stage; send by email, customer accepts/declines, decline/revise/archive | ✅ Done |
 | M8 | Planning — scheduling board: order route steps onto machines over time, per-machine queues, due dates | ⬜ Planned |
 | M9 | Hardening & dashboard — overview, search, demo data | ⬜ Planned |
 
@@ -187,7 +187,7 @@ milestones**. Each milestone is fully tested and ends in its own commit.
   manual per-address overrides.
 - Gated by `orders.view` / `orders.manage`.
 
-### M7 — Quotes (in progress)
+### M7 — Quotes
 
 - A **quote is the same document as an order**, in an earlier stage. Lifecycle:
   `draft → sent → accepted → in_production → completed`, with `declined` and
@@ -201,8 +201,10 @@ milestones**. Each milestone is fully tested and ends in its own commit.
   a declined quote can be **revised** back to a draft and re-sent, or
   **archived** (archiving always needs a reason — you can archive a quote
   yourself too). Archived documents drop out of the default lists.
-- *Next (M7 phase 2):* email the quote to the customer with a public
-  accept/decline link (no login).
+- **Email the quote** to the customer: "Send to customer" emails a secure
+  **public link** (no login) where they review the quote and **accept** (it
+  becomes an order) or **decline** (with a reason). The link is a hashed,
+  expiring token and is consumed once a decision is made.
 
 ---
 
