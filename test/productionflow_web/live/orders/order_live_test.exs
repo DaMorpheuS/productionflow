@@ -48,18 +48,18 @@ defmodule ProductionflowWeb.Orders.OrderLiveTest do
 
     @tag permissions: ["orders.view"]
     test "lists orders; view-only sees no New button", %{conn: conn} do
-      order = order_fixture(relation_fixture(%{name: "Acme"}))
+      {:ok, order} = Orders.accept_quote(order_fixture(relation_fixture(%{name: "Acme"})))
 
       {:ok, _lv, html} = live(conn, ~p"/orders")
       assert html =~ order.number
       assert html =~ "Acme"
-      refute html =~ "New order"
+      refute html =~ "New quote"
     end
 
     @tag permissions: ["orders.manage"]
     test "managers see the New button", %{conn: conn} do
       {:ok, _lv, html} = live(conn, ~p"/orders")
-      assert html =~ "New order"
+      assert html =~ "New quote"
     end
   end
 
@@ -117,7 +117,7 @@ defmodule ProductionflowWeb.Orders.OrderLiveTest do
 
       assert has_element?(lv, "section", "A5 flyer")
 
-      render_hook(lv, "transition", %{"status" => "confirmed"})
+      render_hook(lv, "accept", %{})
       render_hook(lv, "transition", %{"status" => "in_production"})
 
       # Route steps are advanced on each line's own page.
@@ -143,9 +143,10 @@ defmodule ProductionflowWeb.Orders.OrderLiveTest do
       order = order_fixture()
 
       {:ok, lv, html} = live(conn, ~p"/orders/#{order}")
-      refute html =~ "Confirm"
+      refute html =~ "Accept"
+      refute html =~ "Send to customer"
 
-      render_hook(lv, "transition", %{"status" => "confirmed"})
+      render_hook(lv, "accept", %{})
       assert Orders.get_order!(order.id).status == :draft
     end
   end
@@ -268,6 +269,53 @@ defmodule ProductionflowWeb.Orders.OrderLiveTest do
       assert html =~ "waits for Parent"
       # Parent is rendered above Child even though it was added after.
       assert elem(:binary.match(html, "Parent"), 0) < elem(:binary.match(html, "Child"), 0)
+    end
+  end
+
+  describe "Quotes" do
+    setup :register_and_log_in_user
+
+    @tag permissions: ["orders.view"]
+    test "the quotes list shows draft quotes, the orders list does not", %{conn: conn} do
+      quote = order_fixture(relation_fixture(%{name: "Quotely"}))
+
+      {:ok, _lv, quotes} = live(conn, ~p"/quotes")
+      assert quotes =~ quote.quote_number
+
+      {:ok, _lv, orders} = live(conn, ~p"/orders")
+      refute orders =~ quote.quote_number
+    end
+
+    @tag permissions: ["orders.manage"]
+    test "accepting a quote turns it into an order", %{conn: conn} do
+      order = order_fixture()
+      {:ok, lv, _html} = live(conn, ~p"/orders/#{order}")
+
+      render_hook(lv, "accept", %{})
+
+      accepted = Orders.get_order!(order.id)
+      assert accepted.status == :accepted
+      assert accepted.number =~ ~r/^ORD-/
+    end
+
+    @tag permissions: ["orders.manage"]
+    test "declining requires a reason and records it", %{conn: conn} do
+      order = order_fixture()
+      {:ok, order} = Orders.transition_order(order, :sent)
+      {:ok, lv, _html} = live(conn, ~p"/orders/#{order}")
+
+      # opening the decline form, then submitting without a reason is rejected
+      render_hook(lv, "show_action", %{"action" => "decline"})
+      lv |> form("#decline-form", %{decline_reason: "", decline_notes: ""}) |> render_submit()
+      assert Orders.get_order!(order.id).status == :sent
+
+      lv
+      |> form("#decline-form", %{decline_reason: "price", decline_notes: "too high"})
+      |> render_submit()
+
+      declined = Orders.get_order!(order.id)
+      assert declined.status == :declined
+      assert declined.decline_reason == :price
     end
   end
 end

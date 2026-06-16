@@ -22,8 +22,9 @@ defmodule ProductionflowWeb.Orders.OrderLive.Show do
 
     socket
     |> assign(:order, order)
-    |> assign(:page_title, order.number)
+    |> assign(:page_title, order.number || order.quote_number)
     |> assign(:can_edit, socket.assigns.can_manage and Order.editable?(order))
+    |> assign(:pending_action, nil)
     |> assign(:totals, Orders.order_totals(order))
     |> assign(:all_done, Orders.all_steps_done?(order.id))
     |> assign(:address_options, address_options(order))
@@ -43,13 +44,14 @@ defmodule ProductionflowWeb.Orders.OrderLive.Show do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope} page_title={@page_title}>
       <.header>
-        {@order.number}
+        {@order.number || @order.quote_number}
         <span class={["badge ml-2", order_status_class(@order.status)]}>
           {status_label(@order.status)}
         </span>
+        <span :if={@order.archived_at} class="badge badge-ghost ml-1">{gettext("Archived")}</span>
         <:subtitle>
-          <.link navigate={~p"/orders"} class="hover:underline">
-            &larr; {gettext("All orders")}
+          <.link navigate={back_path(@order)} class="hover:underline">
+            &larr; {back_label(@order)}
           </.link>
           · {@order.relation.name}
         </:subtitle>
@@ -58,11 +60,32 @@ defmodule ProductionflowWeb.Orders.OrderLive.Show do
             {gettext("Edit")}
           </.button>
           <.button
-            :if={@can_manage and :confirmed in Order.next_statuses(@order.status)}
-            phx-click="transition"
-            phx-value-status="confirmed"
+            :if={@can_manage and :sent in Order.next_statuses(@order.status)}
+            variant="primary"
+            phx-click="send"
           >
-            {gettext("Confirm")}
+            {gettext("Send to customer")}
+          </.button>
+          <.button
+            :if={@can_manage and :accepted in Order.next_statuses(@order.status)}
+            variant="primary"
+            phx-click="accept"
+            data-confirm={gettext("Accept this quote and turn it into an order?")}
+          >
+            {gettext("Accept")}
+          </.button>
+          <.button
+            :if={@can_manage and :declined in Order.next_statuses(@order.status)}
+            phx-click="show_action"
+            phx-value-action="decline"
+          >
+            {gettext("Decline")}
+          </.button>
+          <.button
+            :if={@can_manage and @order.status in [:sent, :declined]}
+            phx-click="revise"
+          >
+            {gettext("Revise")}
           </.button>
           <.button
             :if={@can_manage and :in_production in Order.next_statuses(@order.status)}
@@ -84,23 +107,90 @@ defmodule ProductionflowWeb.Orders.OrderLive.Show do
             :if={@can_manage and :cancelled in Order.next_statuses(@order.status)}
             phx-click="transition"
             phx-value-status="cancelled"
-            data-confirm={gettext("Cancel this order?")}
+            data-confirm={gettext("Cancel this?")}
           >
             {gettext("Cancel")}
+          </.button>
+          <.button
+            :if={
+              @can_manage and @order.status in [:declined, :cancelled] and is_nil(@order.archived_at)
+            }
+            phx-click="show_action"
+            phx-value-action="archive"
+          >
+            {gettext("Archive")}
           </.button>
         </:actions>
       </.header>
 
+      <section
+        :if={@pending_action == :decline}
+        class="rounded-xl border border-error/40 bg-base-100 p-6"
+      >
+        <h2 class="mb-2 text-base font-semibold">{gettext("Decline quote")}</h2>
+        <.form
+          for={%{}}
+          id="decline-form"
+          phx-submit="decline"
+          class="grid items-end gap-3 sm:grid-cols-3"
+        >
+          <.input
+            name="decline_reason"
+            value=""
+            type="select"
+            label={gettext("Reason")}
+            prompt={gettext("Choose a reason")}
+            options={decline_reason_options()}
+          />
+          <.input name="decline_notes" value="" type="text" label={gettext("Notes")} />
+          <div class="flex gap-2">
+            <.button variant="primary">{gettext("Decline")}</.button>
+            <.button type="button" phx-click="cancel_action">{gettext("Cancel")}</.button>
+          </div>
+        </.form>
+      </section>
+
+      <section
+        :if={@pending_action == :archive}
+        class="rounded-xl border border-base-300 bg-base-100 p-6"
+      >
+        <h2 class="mb-2 text-base font-semibold">{gettext("Archive")}</h2>
+        <.form
+          for={%{}}
+          id="archive-form"
+          phx-submit="archive"
+          class="grid items-end gap-3 sm:grid-cols-3"
+        >
+          <.input name="archive_reason" value="" type="text" label={gettext("Reason for archiving")} />
+          <div class="flex gap-2">
+            <.button variant="primary">{gettext("Archive")}</.button>
+            <.button type="button" phx-click="cancel_action">{gettext("Cancel")}</.button>
+          </div>
+        </.form>
+      </section>
+
       <section class="rounded-xl border border-base-300 bg-base-100 p-6">
         <dl class="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
           <.field label={gettext("Customer")} value={@order.relation.name} />
+          <.field label={gettext("Quote number")} value={@order.quote_number} />
+          <.field :if={@order.number} label={gettext("Order number")} value={@order.number} />
           <.field label={gettext("Reference")} value={@order.reference} />
           <.field label={gettext("Order date")} value={@order.order_date} />
           <.field label={gettext("Due date")} value={@order.due_date} />
+          <.field :if={@order.valid_until} label={gettext("Valid until")} value={@order.valid_until} />
           <.field label={gettext("Total price")} value={money(@totals.price)} />
           <.field label={gettext("Total cost")} value={money(@totals.cost)} />
           <.field label={gettext("Total margin")} value={money(@totals.margin)} />
         </dl>
+        <p
+          :if={@order.status == :declined}
+          class="mt-4 border-t border-base-200 pt-3 text-sm text-error"
+        >
+          {gettext("Declined")}: {status_label(@order.decline_reason)}{decline_notes_suffix(@order)}
+        </p>
+        <p :if={@order.archived_at} class="mt-2 text-sm text-base-content/60">
+          {gettext("Archived")}: {@order.archive_reason}
+        </p>
         <p :if={@order.notes} class="mt-4 whitespace-pre-line border-t border-base-200 pt-3 text-sm">
           {@order.notes}
         </p>
@@ -332,6 +422,69 @@ defmodule ProductionflowWeb.Orders.OrderLive.Show do
     end)
   end
 
+  def handle_event("send", _params, socket) do
+    authorize(socket, fn ->
+      case Orders.transition_order(socket.assigns.order, :sent) do
+        {:ok, _} ->
+          {:noreply, reload(socket, gettext("Quote marked as sent."))}
+
+        {:error, _} ->
+          {:noreply, put_flash(socket, :error, gettext("That change is not allowed."))}
+      end
+    end)
+  end
+
+  def handle_event("accept", _params, socket) do
+    authorize(socket, fn ->
+      case Orders.accept_quote(socket.assigns.order) do
+        {:ok, order} ->
+          {:noreply,
+           reload(socket, gettext("Quote accepted — order %{n} created.", n: order.number))}
+
+        {:error, _} ->
+          {:noreply, put_flash(socket, :error, gettext("Could not accept the quote."))}
+      end
+    end)
+  end
+
+  def handle_event("revise", _params, socket) do
+    authorize(socket, fn ->
+      case Orders.revise_quote(socket.assigns.order) do
+        {:ok, _} -> {:noreply, reload(socket, gettext("Back to draft — adjust and re-send."))}
+        {:error, _} -> {:noreply, put_flash(socket, :error, gettext("Could not revise."))}
+      end
+    end)
+  end
+
+  def handle_event("show_action", %{"action" => action}, socket) do
+    {:noreply, assign(socket, :pending_action, String.to_existing_atom(action))}
+  end
+
+  def handle_event("cancel_action", _params, socket) do
+    {:noreply, assign(socket, :pending_action, nil)}
+  end
+
+  def handle_event("decline", params, socket) do
+    authorize(socket, fn ->
+      case Orders.decline_quote(socket.assigns.order, params) do
+        {:ok, _} -> {:noreply, reload(socket, gettext("Quote declined."))}
+        {:error, _} -> {:noreply, put_flash(socket, :error, gettext("Choose a decline reason."))}
+      end
+    end)
+  end
+
+  def handle_event("archive", %{"archive_reason" => reason}, socket) do
+    authorize(socket, fn ->
+      case Orders.archive_order(socket.assigns.order, reason) do
+        {:ok, _} ->
+          {:noreply, reload(socket, gettext("Archived."))}
+
+        {:error, _} ->
+          {:noreply, put_flash(socket, :error, gettext("A reason is required to archive."))}
+      end
+    end)
+  end
+
   def handle_event("add_line", %{"product_template_id" => "", "quantity" => _}, socket) do
     {:noreply, put_flash(socket, :error, gettext("Choose a product first."))}
   end
@@ -399,6 +552,20 @@ defmodule ProductionflowWeb.Orders.OrderLive.Show do
   defp complete_error(:steps_unfinished), do: gettext("Every route step must be done first.")
   defp complete_error(:not_in_production), do: gettext("The order is not in production.")
   defp complete_error(_), do: gettext("Could not complete the order.")
+
+  defp back_path(order), do: if(Order.quote?(order), do: ~p"/quotes", else: ~p"/orders")
+
+  defp back_label(order),
+    do: if(Order.quote?(order), do: gettext("All quotes"), else: gettext("All orders"))
+
+  defp decline_reason_options do
+    Enum.map(Order.decline_reasons(), &{status_label(&1), to_string(&1)})
+  end
+
+  defp decline_notes_suffix(%{decline_notes: notes}) when notes not in [nil, ""],
+    do: " — #{notes}"
+
+  defp decline_notes_suffix(_order), do: ""
 
   defp template_options do
     Catalog.list_product_templates() |> Enum.map(&{&1.name, &1.id})

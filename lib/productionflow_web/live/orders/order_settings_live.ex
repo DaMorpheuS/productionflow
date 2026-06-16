@@ -20,11 +20,23 @@ defmodule ProductionflowWeb.Orders.OrderSettingsLive do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope} page_title={@page_title}>
       <.header>
-        {gettext("Order numbering")}
-        <:subtitle>{gettext("How new order numbers are generated.")}</:subtitle>
+        {gettext("Numbering")}
+        <:subtitle>{gettext("How new quote and order numbers are generated.")}</:subtitle>
       </.header>
 
       <.form for={@form} id="order-settings-form" phx-change="validate" phx-submit="save">
+        <h2 class="mb-2 text-sm font-semibold">{gettext("Quotes")}</h2>
+        <div class="grid gap-4 sm:grid-cols-2">
+          <.input
+            field={@form[:quote_number_mode]}
+            type="select"
+            label={gettext("Numbering")}
+            options={@mode_options}
+          />
+          <.input field={@form[:quote_number_prefix]} type="text" label={gettext("Prefix")} required />
+        </div>
+
+        <h2 class="mb-2 mt-4 text-sm font-semibold">{gettext("Orders")}</h2>
         <div class="grid gap-4 sm:grid-cols-2">
           <.input
             field={@form[:number_mode]}
@@ -36,7 +48,7 @@ defmodule ProductionflowWeb.Orders.OrderSettingsLive do
         </div>
         <p class="mt-2 text-sm text-base-content/60">
           {gettext(
-            "Per-year resets the counter each year (e.g. ORD-2026-0001); continuous never resets (e.g. ORD-0001)."
+            "Per-year resets the counter each year (e.g. QUO-2026-0001); continuous never resets (e.g. QUO-0001)."
           )}
         </p>
         <div class="mt-6">

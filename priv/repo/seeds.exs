@@ -498,9 +498,9 @@ end
 
 IO.puts("Pricing seed: set default margin and ensured general volume tiers for the flyer.")
 
-# Demo customer + a confirmed order with one flyer line, so the orders area has
-# real data. Idempotent: the customer is matched by name, and the order is only
-# created when that customer has none (so re-running doesn't pile up orders).
+# Demo customer + a quote (with one flyer line) that is accepted into an order, so
+# both the quotes and orders areas have real data. Idempotent: the customer is
+# matched by name, and the document is only created when that customer has none.
 demo_customer =
   case Repo.get_by(CRM.Relation, name: "Demo Print Customer") do
     nil ->
@@ -528,6 +528,10 @@ unless Repo.exists?(
       "save_to_customer" => "true"
     })
 
-  {:ok, order} = Orders.transition_order(order, :confirmed)
-  IO.puts("Orders seed: created demo order #{order.number} for #{demo_customer.name}.")
+  {:ok, order} = Orders.accept_quote(order)
+
+  IO.puts(
+    "Orders seed: created quote #{order.quote_number}, accepted as order #{order.number} " <>
+      "for #{demo_customer.name}."
+  )
 end

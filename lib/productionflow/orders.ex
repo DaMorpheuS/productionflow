@@ -8,12 +8,15 @@ defmodule Productionflow.Orders do
   duration/cost (via `Catalog.estimate/2`). Snapshots keep an order independent
   of later price/machine/material changes.
 
-  Progress rolls up: each route step has its own status, a line's status derives
-  from its steps, and the order's lifecycle (`draft → confirmed → in_production →
-  completed`, plus `cancelled`) is gated on that progress. Completing an order
-  consumes the materials' stock through `Inventory.consume/3` (which permits
-  negative stock — a material may be specially purchased for the order). Orders
-  are cancelled, never deleted.
+  A document is a **quote** until it is accepted, then an **order** — the
+  lifecycle is `draft → sent → accepted → in_production → completed` (plus
+  `declined` and `cancelled`). Accepting assigns the order number; declining
+  records a reason and the quote can be revised or archived. Progress rolls up:
+  each route step has its own status, a line's status derives from its steps, and
+  completion is gated on every step being done. Completing consumes the
+  materials' stock through `Inventory.consume/3` (which permits negative stock —
+  a material may be specially purchased). Documents are cancelled/archived, never
+  deleted.
   """
 
   import Ecto.Query, warn: false
@@ -60,14 +63,18 @@ defmodule Productionflow.Orders do
   Lists orders, most recent first.
 
   ## Options
-    * `:search` - matches order number, reference or customer name
+    * `:search` - matches quote/order number, reference or customer name
     * `:status` - filter to a single status
+    * `:scope` - `:quotes` (quote-stage docs) or `:orders` (accepted onward)
+    * `:include_archived` - when true, also returns archived documents
   """
   def list_orders(opts \\ []) do
     Order
     |> join(:inner, [o], r in assoc(o, :relation), as: :relation)
     |> filter_order_search(Keyword.get(opts, :search))
     |> filter_order_status(Keyword.get(opts, :status))
+    |> filter_order_scope(Keyword.get(opts, :scope))
+    |> filter_archived(Keyword.get(opts, :include_archived, false))
     |> order_by([o], desc: o.inserted_at)
     |> preload([relation: r], relation: r)
     |> Repo.all()
@@ -81,12 +88,24 @@ defmodule Productionflow.Orders do
     where(
       query,
       [o, relation: r],
-      ilike(o.number, ^like) or ilike(o.reference, ^like) or ilike(r.name, ^like)
+      ilike(o.quote_number, ^like) or ilike(o.number, ^like) or ilike(o.reference, ^like) or
+        ilike(r.name, ^like)
     )
   end
 
   defp filter_order_status(query, status) when status in [nil, "", :all], do: query
   defp filter_order_status(query, status), do: where(query, [o], o.status == ^status)
+
+  defp filter_order_scope(query, :quotes),
+    do: where(query, [o], o.status in ^Order.quote_statuses())
+
+  defp filter_order_scope(query, :orders),
+    do: where(query, [o], o.status not in ^Order.quote_statuses())
+
+  defp filter_order_scope(query, _), do: query
+
+  defp filter_archived(query, true), do: query
+  defp filter_archived(query, _), do: where(query, [o], is_nil(o.archived_at))
 
   @doc "Gets an order with its customer, lines, route steps, materials and dependencies preloaded."
   def get_order!(id) do
@@ -107,40 +126,51 @@ defmodule Productionflow.Orders do
   def change_order(%Order{} = order, attrs \\ %{}), do: Order.changeset(order, attrs)
 
   @doc """
-  Creates a draft order, generating its number atomically from the configured
-  numbering scheme.
+  Creates a draft quote, generating its quote number atomically. The order number
+  is assigned later, on acceptance.
   """
   def create_order(attrs) do
     settings = get_settings()
     today = Date.utc_today()
 
     Repo.transact(fn ->
-      number = generate_number(settings, today)
+      quote_number = generate_quote_number(settings, today)
 
-      %Order{number: number, status: :draft, order_date: today}
+      %Order{quote_number: quote_number, status: :draft, order_date: today}
       |> Order.changeset(attrs)
       |> Repo.insert()
     end)
   end
 
   @doc "Updates an order's editable fields (while draft or confirmed)."
-  def update_order(%Order{status: status} = order, attrs) when status in [:draft, :confirmed],
+  def update_order(%Order{status: status} = order, attrs) when status in [:draft, :accepted],
     do: order |> Order.changeset(attrs) |> Repo.update()
 
   def update_order(%Order{}, _attrs), do: {:error, :not_editable}
 
   ## Numbering
 
-  defp generate_number(%Settings{} = settings, today) do
+  # Order numbers and quote numbers share the scheme but have separate counters
+  # (the quote counter scope is prefixed "quote-").
+  defp generate_number(%Settings{} = settings, today),
+    do: build_number(settings.number_mode, settings.number_prefix, "", today)
+
+  defp generate_quote_number(%Settings{} = settings, today),
+    do: build_number(settings.quote_number_mode, settings.quote_number_prefix, "quote-", today)
+
+  defp build_number(mode, prefix, scope_prefix, today) do
     {scope, year_part} =
-      case settings.number_mode do
-        :per_year -> {Integer.to_string(today.year), Integer.to_string(today.year)}
-        :continuous -> {"global", nil}
+      case mode do
+        :per_year ->
+          {scope_prefix <> Integer.to_string(today.year), Integer.to_string(today.year)}
+
+        :continuous ->
+          {scope_prefix <> "global", nil}
       end
 
     seq = scope |> next_counter_value() |> Integer.to_string() |> String.pad_leading(4, "0")
 
-    [settings.number_prefix, year_part, seq]
+    [prefix, year_part, seq]
     |> Enum.reject(&is_nil/1)
     |> Enum.join("-")
   end
@@ -179,7 +209,7 @@ defmodule Productionflow.Orders do
   allowed while the order is a draft.
   """
   def add_line_from_template(%Order{status: status} = order, template_id, quantity)
-      when status in [:draft, :confirmed] do
+      when status in [:draft, :accepted] do
     template = Catalog.get_product_template!(template_id)
     order = Repo.preload(order, :relation)
     quote = Pricing.quote(template, quantity, relation: order.relation)
@@ -264,7 +294,7 @@ defmodule Productionflow.Orders do
   end
 
   defp editable_order?(order_id) do
-    Repo.one(from o in Order, where: o.id == ^order_id, select: o.status) in [:draft, :confirmed]
+    Repo.one(from o in Order, where: o.id == ^order_id, select: o.status) in [:draft, :accepted]
   end
 
   ## Ad-hoc lines (built from scratch, not from a template)
@@ -278,7 +308,7 @@ defmodule Productionflow.Orders do
   route + materials cost plus the default margin as those are added.
   """
   def add_blank_line(%Order{status: status} = order, attrs)
-      when status in [:draft, :confirmed] do
+      when status in [:draft, :accepted] do
     manual = parse_decimal(attrs["unit_price"])
 
     %OrderLine{
@@ -721,12 +751,64 @@ defmodule Productionflow.Orders do
 
   ## Lifecycle
 
-  @doc "Moves an order to `new_status` (for confirmed / in_production / cancelled)."
+  @doc "Moves an order to `new_status` (for sent / in_production / cancelled / draft)."
   def transition_order(%Order{} = order, new_status),
     do: order |> Order.transition_changeset(new_status) |> Repo.update()
 
   @doc "Cancels an order (allowed from any non-terminal status)."
   def cancel_order(%Order{} = order), do: transition_order(order, :cancelled)
+
+  ## Quote lifecycle
+
+  @doc """
+  Accepts a quote, turning it into an order: assigns the order number (if not yet
+  set) and transitions to `:accepted`, atomically.
+  """
+  def accept_quote(%Order{} = order) do
+    settings = get_settings()
+
+    Repo.transact(fn ->
+      number = order.number || generate_number(settings, Date.utc_today())
+
+      order
+      |> Order.transition_changeset(:accepted)
+      |> Ecto.Changeset.put_change(:number, number)
+      |> Repo.update()
+    end)
+  end
+
+  @doc "Declines a quote with a reason and optional notes."
+  def decline_quote(%Order{} = order, attrs) do
+    order
+    |> Order.transition_changeset(:declined)
+    |> Ecto.Changeset.cast(attrs, [:decline_reason, :decline_notes])
+    |> Ecto.Changeset.validate_required([:decline_reason])
+    |> Repo.update()
+  end
+
+  @doc "Revises a sent or declined quote back to a draft so it can be edited and re-sent."
+  def revise_quote(%Order{} = order) do
+    order
+    |> Order.transition_changeset(:draft)
+    |> Ecto.Changeset.put_change(:decline_reason, nil)
+    |> Ecto.Changeset.put_change(:decline_notes, nil)
+    |> Repo.update()
+  end
+
+  @doc """
+  Archives a document with a required reason (allowed for declined or cancelled
+  documents). Archived documents are hidden from the default lists.
+  """
+  def archive_order(%Order{status: status} = order, reason)
+      when status in [:declined, :cancelled] do
+    order
+    |> Ecto.Changeset.change(archived_at: DateTime.utc_now(:second))
+    |> Ecto.Changeset.cast(%{archive_reason: reason}, [:archive_reason])
+    |> Ecto.Changeset.validate_required([:archive_reason])
+    |> Repo.update()
+  end
+
+  def archive_order(%Order{}, _reason), do: {:error, :not_archivable}
 
   @doc """
   Completes an order: requires it to be in production with every route step done,

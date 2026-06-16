@@ -23,12 +23,13 @@ defmodule ProductionflowWeb.Orders.OrderLive.Form do
           <.input field={@form[:reference]} type="text" label={gettext("Reference / PO")} />
           <.input field={@form[:order_date]} type="date" label={gettext("Order date")} required />
           <.input field={@form[:due_date]} type="date" label={gettext("Due date")} />
+          <.input field={@form[:valid_until]} type="date" label={gettext("Quote valid until")} />
         </div>
         <.input field={@form[:notes]} type="textarea" label={gettext("Notes")} />
 
         <div class="mt-6 flex items-center gap-3">
           <.button variant="primary" phx-disable-with={gettext("Saving...")}>
-            {gettext("Save order")}
+            {gettext("Save")}
           </.button>
           <.button navigate={cancel_path(@order)}>{gettext("Cancel")}</.button>
         </div>
@@ -47,7 +48,7 @@ defmodule ProductionflowWeb.Orders.OrderLive.Form do
     order = %Order{order_date: Date.utc_today()}
 
     socket
-    |> assign(:page_title, gettext("New order"))
+    |> assign(:page_title, gettext("New quote"))
     |> assign(:order, order)
     |> assign_form(Orders.change_order(order))
   end
@@ -56,7 +57,7 @@ defmodule ProductionflowWeb.Orders.OrderLive.Form do
     order = Orders.get_order!(id)
 
     socket
-    |> assign(:page_title, gettext("Edit order"))
+    |> assign(:page_title, gettext("Edit"))
     |> assign(:order, order)
     |> assign_form(Orders.change_order(order))
   end

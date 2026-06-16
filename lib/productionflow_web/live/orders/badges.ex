@@ -4,9 +4,11 @@ defmodule ProductionflowWeb.Orders.Badges do
   @doc "Human label for any status atom, e.g. :in_production → \"In production\"."
   def status_label(status), do: Phoenix.Naming.humanize(status)
 
-  @doc "daisyUI badge class for an order status."
+  @doc "daisyUI badge class for an order/quote status."
   def order_status_class(:draft), do: "badge-ghost"
-  def order_status_class(:confirmed), do: "badge-info"
+  def order_status_class(:sent), do: "badge-info"
+  def order_status_class(:accepted), do: "badge-info"
+  def order_status_class(:declined), do: "badge-error"
   def order_status_class(:in_production), do: "badge-warning"
   def order_status_class(:completed), do: "badge-success"
   def order_status_class(:cancelled), do: "badge-error"

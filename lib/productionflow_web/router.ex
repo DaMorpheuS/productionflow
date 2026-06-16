@@ -239,6 +239,18 @@ defmodule ProductionflowWeb.Router do
     end
   end
 
+  scope "/quotes", ProductionflowWeb.Orders, as: :quotes do
+    pipe_through [:browser, :require_authenticated_user]
+
+    live_session :quotes,
+      on_mount: [
+        {ProductionflowWeb.UserAuth, :require_authenticated},
+        {ProductionflowWeb.UserAuth, {:require_permission, "orders.view"}}
+      ] do
+      live "/", OrderLive.Index, :quotes
+    end
+  end
+
   scope "/", ProductionflowWeb do
     pipe_through [:browser]
 

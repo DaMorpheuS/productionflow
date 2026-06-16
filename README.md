@@ -36,7 +36,7 @@ milestones**. Each milestone is fully tested and ends in its own commit.
 | M5a | Catalog — product templates (production route + bill of materials) + cost/time preview | ✅ Done |
 | M5b | Pricing — customer price (margin) + price lists + quote view | ✅ Done |
 | M6 | Orders — orders, lines, per-line production routes, lifecycle, stock consumption | ✅ Done |
-| M7 | Quotes — saved multi-line quotes for a customer, lifecycle, validity, price/cost/margin snapshots, convert to order | ⬜ Planned |
+| M7 | Quotes — a quote is an order in a pre-acceptance stage; send by email, customer accepts/declines, decline/revise/archive | 🔨 In progress |
 | M8 | Planning — scheduling board: order route steps onto machines over time, per-machine queues, due dates | ⬜ Planned |
 | M9 | Hardening & dashboard — overview, search, demo data | ⬜ Planned |
 
@@ -186,6 +186,23 @@ milestones**. Each milestone is fully tested and ends in its own commit.
   the delivery addresses (and re-divided when one is added or removed), with
   manual per-address overrides.
 - Gated by `orders.view` / `orders.manage`.
+
+### M7 — Quotes (in progress)
+
+- A **quote is the same document as an order**, in an earlier stage. Lifecycle:
+  `draft → sent → accepted → in_production → completed`, with `declined` and
+  `cancelled`. **Accepting a quote turns it into an order** (and assigns its
+  order number). The **Quotes** and **Orders** lists are two filtered views of
+  the same documents.
+- **Numbering** is configurable like orders: a **quote number**
+  (`QUO-2026-0001`, default per-year) at creation, an **order number**
+  (`ORD-…`) on acceptance.
+- **Declining** records a reason (Price / Technically wrong / Other) with notes;
+  a declined quote can be **revised** back to a draft and re-sent, or
+  **archived** (archiving always needs a reason — you can archive a quote
+  yourself too). Archived documents drop out of the default lists.
+- *Next (M7 phase 2):* email the quote to the customer with a public
+  accept/decline link (no login).
 
 ---
 

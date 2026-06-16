@@ -33,29 +33,37 @@ defmodule Productionflow.OrdersTest do
     %{template: Productionflow.Catalog.get_product_template!(template.id), material: material}
   end
 
-  defp confirmed_in_production(order) do
-    {:ok, order} = Orders.transition_order(order, :confirmed)
+  defp accepted_in_production(order) do
+    {:ok, order} = Orders.accept_quote(order)
     {:ok, order} = Orders.transition_order(order, :in_production)
     order
   end
 
   describe "numbering" do
-    test "per-year mode numbers ORD-<year>-0001, incrementing" do
+    test "a new quote gets a per-year quote number, no order number yet" do
       year = Date.utc_today().year
       o1 = order_fixture()
       o2 = order_fixture()
-      assert o1.number == "ORD-#{year}-0001"
-      assert o2.number == "ORD-#{year}-0002"
+      assert o1.quote_number == "QUO-#{year}-0001"
+      assert o2.quote_number == "QUO-#{year}-0002"
+      assert o1.number == nil
     end
 
-    test "continuous mode drops the year" do
-      Orders.update_settings(%{number_mode: :continuous})
-      assert order_fixture().number == "ORD-0001"
+    test "continuous quote mode drops the year" do
+      Orders.update_settings(%{quote_number_mode: :continuous})
+      assert order_fixture().quote_number == "QUO-0001"
     end
 
-    test "a custom prefix is honoured" do
-      Orders.update_settings(%{number_prefix: "JOB"})
-      assert order_fixture().number =~ ~r/^JOB-/
+    test "a custom quote prefix is honoured" do
+      Orders.update_settings(%{quote_number_prefix: "OFF"})
+      assert order_fixture().quote_number =~ ~r/^OFF-/
+    end
+
+    test "accepting assigns a per-year order number" do
+      year = Date.utc_today().year
+      assert {:ok, o} = Orders.accept_quote(order_fixture())
+      assert o.status == :accepted
+      assert o.number == "ORD-#{year}-0001"
     end
   end
 
@@ -91,15 +99,15 @@ defmodule Productionflow.OrdersTest do
     end
 
     test "is rejected once the order leaves draft", %{template: template} do
-      order = order_fixture() |> confirmed_in_production()
+      order = order_fixture() |> accepted_in_production()
       assert {:error, :not_editable} = Orders.add_line_from_template(order, template.id, "100")
     end
   end
 
   describe "status transitions" do
-    test "legal path draft → confirmed → in_production" do
+    test "legal path draft → accepted → in_production" do
       order = order_fixture()
-      assert {:ok, %Order{status: :confirmed} = o} = Orders.transition_order(order, :confirmed)
+      assert {:ok, %Order{status: :accepted} = o} = Orders.accept_quote(order)
       assert {:ok, %Order{status: :in_production}} = Orders.transition_order(o, :in_production)
     end
 
@@ -114,15 +122,50 @@ defmodule Productionflow.OrdersTest do
       assert {:ok, %Order{status: :cancelled}} = Orders.cancel_order(order)
     end
 
-    test "update_order works while draft or confirmed, not once in production" do
+    test "update_order works while draft or accepted, not once in production" do
       order = order_fixture()
       assert {:ok, _} = Orders.update_order(order, %{reference: "PO-1"})
 
-      {:ok, order} = Orders.transition_order(order, :confirmed)
+      {:ok, order} = Orders.accept_quote(order)
       assert {:ok, _} = Orders.update_order(order, %{reference: "PO-2"})
 
       {:ok, order} = Orders.transition_order(order, :in_production)
       assert {:error, :not_editable} = Orders.update_order(order, %{reference: "PO-3"})
+    end
+
+    test "a quote can be sent, declined with a reason, revised and archived" do
+      order = order_fixture()
+      {:ok, order} = Orders.transition_order(order, :sent)
+      assert order.status == :sent
+
+      assert {:error, cs} = Orders.decline_quote(order, %{})
+      assert %{decline_reason: [_]} = errors_on(cs)
+
+      {:ok, order} =
+        Orders.decline_quote(order, %{"decline_reason" => "price", "decline_notes" => "too high"})
+
+      assert order.status == :declined
+      assert order.decline_reason == :price
+      assert order.decline_notes == "too high"
+
+      assert {:error, _} = Orders.archive_order(order, "")
+      {:ok, archived} = Orders.archive_order(order, "not worth re-quoting")
+      assert archived.archived_at
+      assert archived.archive_reason == "not worth re-quoting"
+
+      {:ok, revised} = Orders.revise_quote(order)
+      assert revised.status == :draft
+      assert revised.decline_reason == nil
+    end
+
+    test "archived documents are excluded from the default list" do
+      order = order_fixture()
+      {:ok, order} = Orders.transition_order(order, :sent)
+      {:ok, order} = Orders.decline_quote(order, %{"decline_reason" => "other"})
+      {:ok, _} = Orders.archive_order(order, "no")
+
+      refute Enum.any?(Orders.list_orders(), &(&1.id == order.id))
+      assert Enum.any?(Orders.list_orders(include_archived: true), &(&1.id == order.id))
     end
   end
 
@@ -136,7 +179,7 @@ defmodule Productionflow.OrdersTest do
 
       assert {:error, :order_not_in_production} = Orders.advance_step(step, :in_progress)
 
-      order = confirmed_in_production(order)
+      order = accepted_in_production(order)
       assert order.status == :in_production
       assert {:ok, _} = Orders.advance_step(Orders.get_route_step!(step.id), :in_progress)
     end
@@ -144,7 +187,7 @@ defmodule Productionflow.OrdersTest do
     test "illegal step transitions are rejected", %{template: template} do
       order = order_fixture()
       {:ok, line} = Orders.add_line_from_template(order, template.id, "100")
-      confirmed_in_production(order)
+      accepted_in_production(order)
       step = Orders.get_route_step!(hd(line.route_steps).id)
 
       assert {:error, changeset} = Orders.advance_step(step, :done)
@@ -154,7 +197,7 @@ defmodule Productionflow.OrdersTest do
     test "cannot complete until every step is done", %{template: template} do
       order = order_fixture()
       Orders.add_line_from_template(order, template.id, "100")
-      order = confirmed_in_production(order)
+      order = accepted_in_production(order)
 
       assert {:error, :steps_unfinished} = Orders.complete_order(order, nil)
     end
@@ -165,7 +208,7 @@ defmodule Productionflow.OrdersTest do
     } do
       order = order_fixture()
       {:ok, line} = Orders.add_line_from_template(order, template.id, "100")
-      order = confirmed_in_production(order)
+      order = accepted_in_production(order)
 
       for step <- line.route_steps do
         {:ok, _} = Orders.advance_step(Orders.get_route_step!(step.id), :in_progress)
@@ -191,7 +234,7 @@ defmodule Productionflow.OrdersTest do
 
       order = order_fixture()
       {:ok, line} = Orders.add_line_from_template(order, template.id, "10")
-      order = confirmed_in_production(order)
+      order = accepted_in_production(order)
 
       for step <- line.route_steps do
         {:ok, _} = Orders.advance_step(Orders.get_route_step!(step.id), :in_progress)
@@ -211,7 +254,7 @@ defmodule Productionflow.OrdersTest do
       {:ok, line} = Orders.add_line_from_template(order, template.id, "100")
       assert Orders.line_status(line) == :pending
 
-      confirmed_in_production(order)
+      accepted_in_production(order)
       step = hd(line.route_steps)
       {:ok, _} = Orders.advance_step(Orders.get_route_step!(step.id), :in_progress)
       assert Orders.line_status(Orders.get_line!(line.id)) == :in_progress
@@ -223,7 +266,7 @@ defmodule Productionflow.OrdersTest do
       assert {:ok, _} = Orders.delete_line(Orders.get_line!(line.id))
 
       {:ok, line2} = Orders.add_line_from_template(order, template.id, "100")
-      confirmed_in_production(order)
+      accepted_in_production(order)
       assert {:error, :not_editable} = Orders.delete_line(Orders.get_line!(line2.id))
     end
   end
@@ -326,7 +369,7 @@ defmodule Productionflow.OrdersTest do
       assert {:ok, _} = Orders.set_line_dependencies(b, [a.id])
       assert Orders.line_status(Orders.get_line!(b.id)) == :blocked
 
-      order = confirmed_in_production(order)
+      order = accepted_in_production(order)
       assert order.status == :in_production
 
       b_step = hd(Orders.get_line!(b.id).route_steps)
@@ -346,7 +389,7 @@ defmodule Productionflow.OrdersTest do
       order = order_fixture()
       {:ok, a} = Orders.add_line_from_template(order, template.id, "100")
       {:ok, b} = Orders.add_line_from_template(order, template.id, "100")
-      confirmed_in_production(order)
+      accepted_in_production(order)
 
       assert {:error, :not_editable} =
                Orders.set_line_dependencies(Orders.get_line!(b.id), [a.id])
@@ -356,9 +399,9 @@ defmodule Productionflow.OrdersTest do
   describe "editable window" do
     setup :priced_setup
 
-    test "lines can still be added while confirmed", %{template: template} do
+    test "lines can still be added while accepted", %{template: template} do
       order = order_fixture()
-      {:ok, order} = Orders.transition_order(order, :confirmed)
+      {:ok, order} = Orders.accept_quote(order)
       assert {:ok, _} = Orders.add_line_from_template(order, template.id, "100")
     end
   end
@@ -457,7 +500,7 @@ defmodule Productionflow.OrdersTest do
 
     test "deliveries cannot be added once in production", %{template: template} do
       %{order: order} = order_with_line(template)
-      confirmed_in_production(order)
+      accepted_in_production(order)
 
       assert {:error, :not_editable} =
                Orders.add_delivery(order, %{"street" => "X", "city" => "Y"})
