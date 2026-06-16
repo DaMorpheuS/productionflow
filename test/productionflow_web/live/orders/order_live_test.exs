@@ -243,5 +243,31 @@ defmodule ProductionflowWeb.Orders.OrderLiveTest do
       assert_redirect(line_lv, ~p"/orders/#{order}")
       assert Orders.get_order!(order.id).lines == []
     end
+
+    @tag permissions: ["orders.manage"]
+    test "a dependent line is ordered below and indented under its dependency", %{conn: conn} do
+      order = order_fixture()
+
+      {:ok, lv, _html} = live(conn, ~p"/orders/#{order}")
+
+      # Add the dependent ("Child") first, then its dependency ("Parent").
+      lv
+      |> form("#add-custom-line-form", %{description: "Child", quantity: "1"})
+      |> render_submit()
+
+      lv
+      |> form("#add-custom-line-form", %{description: "Parent", quantity: "1"})
+      |> render_submit()
+
+      lines = Orders.get_order!(order.id).lines
+      child = Enum.find(lines, &(&1.description == "Child"))
+      parent = Enum.find(lines, &(&1.description == "Parent"))
+      {:ok, _} = Orders.set_line_dependencies(Orders.get_line!(child.id), [parent.id])
+
+      {:ok, _lv, html} = live(conn, ~p"/orders/#{order}")
+      assert html =~ "waits for Parent"
+      # Parent is rendered above Child even though it was added after.
+      assert elem(:binary.match(html, "Parent"), 0) < elem(:binary.match(html, "Child"), 0)
+    end
   end
 end

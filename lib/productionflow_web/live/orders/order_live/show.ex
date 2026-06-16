@@ -113,25 +113,33 @@ defmodule ProductionflowWeb.Orders.OrderLive.Show do
           {gettext("No lines yet.")}
         </p>
 
-        <.link
-          :for={line <- @order.lines}
-          navigate={~p"/orders/#{@order}/lines/#{line}"}
-          class="mb-2 flex items-center justify-between gap-4 rounded-lg border border-base-200 p-3 hover:bg-base-200/40"
-        >
-          <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <span class="font-medium">{qty(line.quantity)} {line.output_unit}</span>
-            <span>{line.description}</span>
-            <span :if={materials_summary(line) != ""} class="text-sm text-base-content/60">
-              · {materials_summary(line)}
-            </span>
+        <div :for={{line, depth} <- ordered_lines(@order.lines)} class="mb-2" style={indent(depth)}>
+          <div
+            :if={depends?(line)}
+            class="mb-0.5 flex items-center gap-1 text-xs text-base-content/50"
+          >
+            <span class="text-base-content/40">&#8627;</span>
+            {gettext("waits for %{names}", names: dependency_names(line))}
           </div>
-          <div class="flex items-center gap-3">
-            <span class={["badge badge-sm", step_status_class(Orders.line_status(line))]}>
-              {status_label(Orders.line_status(line))}
-            </span>
-            <span class="text-sm font-medium">{money(line.total_price)}</span>
-          </div>
-        </.link>
+          <.link
+            navigate={~p"/orders/#{@order}/lines/#{line}"}
+            class="flex items-center justify-between gap-4 rounded-lg border border-base-200 p-3 hover:bg-base-200/40"
+          >
+            <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <span class="font-medium">{qty(line.quantity)} {line.output_unit}</span>
+              <span>{line.description}</span>
+              <span :if={materials_summary(line) != ""} class="text-sm text-base-content/60">
+                · {materials_summary(line)}
+              </span>
+            </div>
+            <div class="flex items-center gap-3">
+              <span class={["badge badge-sm", step_status_class(Orders.line_status(line))]}>
+                {status_label(Orders.line_status(line))}
+              </span>
+              <span class="text-sm font-medium">{money(line.total_price)}</span>
+            </div>
+          </.link>
+        </div>
 
         <.form
           :if={@can_edit}
@@ -398,6 +406,73 @@ defmodule ProductionflowWeb.Orders.OrderLive.Show do
 
   defp materials_summary(line) do
     line.materials |> Enum.map(& &1.material_name) |> Enum.join(", ")
+  end
+
+  defp depends?(%{depends_on: deps}) when is_list(deps), do: deps != []
+  defp depends?(_line), do: false
+
+  defp dependency_names(%{depends_on: deps}) when is_list(deps),
+    do: deps |> Enum.map(& &1.description) |> Enum.join(", ")
+
+  defp indent(0), do: nil
+  defp indent(depth), do: "margin-left: #{depth * 1.5}rem"
+
+  # Orders lines so a line always appears below (and indented under) the line(s)
+  # it depends on. Returns [{line, depth}]; depth = longest dependency chain.
+  defp ordered_lines(lines) do
+    by_id = Map.new(lines, &{&1.id, &1})
+    depth = Enum.reduce(lines, %{}, &line_depth(&1, by_id, &2, MapSet.new()))
+    dependents = dependents_map(lines)
+    roots = Enum.filter(lines, &(&1.depends_on == []))
+
+    {ordered, emitted} =
+      Enum.reduce(roots, {[], MapSet.new()}, &emit_line(&1, dependents, depth, &2))
+
+    # Any line not reached (e.g. a dependency cycle) is appended as-is.
+    remaining =
+      lines
+      |> Enum.reject(&MapSet.member?(emitted, &1.id))
+      |> Enum.map(&{&1, Map.get(depth, &1.id, 0)})
+
+    Enum.reverse(ordered) ++ remaining
+  end
+
+  defp emit_line(line, dependents, depth, {acc, emitted}) do
+    cond do
+      MapSet.member?(emitted, line.id) ->
+        {acc, emitted}
+
+      not Enum.all?(line.depends_on, &MapSet.member?(emitted, &1.id)) ->
+        {acc, emitted}
+
+      true ->
+        acc = [{line, Map.get(depth, line.id, 0)} | acc]
+        emitted = MapSet.put(emitted, line.id)
+        children = Map.get(dependents, line.id, [])
+        Enum.reduce(children, {acc, emitted}, &emit_line(&1, dependents, depth, &2))
+    end
+  end
+
+  defp dependents_map(lines) do
+    for child <- lines, parent <- child.depends_on, reduce: %{} do
+      acc -> Map.update(acc, parent.id, [child], &(&1 ++ [child]))
+    end
+  end
+
+  defp line_depth(line, by_id, acc, visiting) do
+    cond do
+      Map.has_key?(acc, line.id) -> acc
+      MapSet.member?(visiting, line.id) -> Map.put(acc, line.id, 0)
+      line.depends_on == [] -> Map.put(acc, line.id, 0)
+      true -> compute_depth(line, by_id, acc, visiting)
+    end
+  end
+
+  defp compute_depth(line, by_id, acc, visiting) do
+    visiting = MapSet.put(visiting, line.id)
+    acc = Enum.reduce(line.depends_on, acc, &line_depth(by_id[&1.id] || &1, by_id, &2, visiting))
+    d = line.depends_on |> Enum.map(&Map.get(acc, &1.id, 0)) |> Enum.max() |> Kernel.+(1)
+    Map.put(acc, line.id, d)
   end
 
   defp format_address(%{street: street, postal_code: postal, city: city, country: country}) do
