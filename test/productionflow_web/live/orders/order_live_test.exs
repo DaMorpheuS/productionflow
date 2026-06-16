@@ -118,6 +118,7 @@ defmodule ProductionflowWeb.Orders.OrderLiveTest do
       assert has_element?(lv, "section", "A5 flyer")
 
       render_hook(lv, "accept", %{})
+      render_hook(lv, "add_pickup", %{})
       render_hook(lv, "transition", %{"status" => "in_production"})
 
       # Route steps are advanced on each line's own page.
@@ -216,6 +217,23 @@ defmodule ProductionflowWeb.Orders.OrderLiveTest do
 
       assert length(qtys) == 2
       assert Enum.all?(qtys, &Decimal.equal?(&1, Decimal.new("500")))
+    end
+
+    @tag permissions: ["orders.manage"]
+    test "production can't start without a delivery; a pickup enables it", %{conn: conn} do
+      order = order_fixture()
+      {:ok, order} = Orders.accept_quote(order)
+
+      {:ok, lv, html} = live(conn, ~p"/orders/#{order}")
+      # No deliveries yet → no Start production button.
+      refute html =~ "Start production"
+
+      render_hook(lv, "add_pickup", %{})
+      assert render(lv) =~ "Pickup by the customer"
+      assert render(lv) =~ "Start production"
+
+      render_hook(lv, "transition", %{"status" => "in_production"})
+      assert Orders.get_order!(order.id).status == :in_production
     end
   end
 

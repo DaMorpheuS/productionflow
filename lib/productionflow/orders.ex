@@ -599,6 +599,27 @@ defmodule Productionflow.Orders do
     end
   end
 
+  @doc "Adds a customer-pickup delivery (no address) to an editable order."
+  def add_pickup(%Order{} = order) do
+    if editable_order?(order.id) do
+      Repo.transact(fn ->
+        with {:ok, delivery} <-
+               %OrderDelivery{order_id: order.id, position: next_delivery_position(order.id)}
+               |> OrderDelivery.changeset(%{"kind" => "pickup"})
+               |> Repo.insert() do
+          rebalance_all_lines(order.id)
+          {:ok, delivery}
+        end
+      end)
+    else
+      {:error, :not_editable}
+    end
+  end
+
+  @doc "Whether the order has at least one delivery or pickup."
+  def has_deliveries?(order_id),
+    do: Repo.exists?(from d in OrderDelivery, where: d.order_id == ^order_id)
+
   @doc "Removes a delivery and re-divides the lines across the remaining ones."
   def delete_delivery(%OrderDelivery{} = delivery) do
     if editable_order?(delivery.order_id) do
@@ -756,6 +777,14 @@ defmodule Productionflow.Orders do
   ## Lifecycle
 
   @doc "Moves an order to `new_status` (for sent / in_production / cancelled / draft)."
+  def transition_order(%Order{} = order, :in_production) do
+    if has_deliveries?(order.id) do
+      order |> Order.transition_changeset(:in_production) |> Repo.update()
+    else
+      {:error, :no_deliveries}
+    end
+  end
+
   def transition_order(%Order{} = order, new_status),
     do: order |> Order.transition_changeset(new_status) |> Repo.update()
 

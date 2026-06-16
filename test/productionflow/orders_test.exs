@@ -35,6 +35,7 @@ defmodule Productionflow.OrdersTest do
 
   defp accepted_in_production(order) do
     {:ok, order} = Orders.accept_quote(order)
+    {:ok, _} = Orders.add_pickup(order)
     {:ok, order} = Orders.transition_order(order, :in_production)
     order
   end
@@ -108,7 +109,19 @@ defmodule Productionflow.OrdersTest do
     test "legal path draft → accepted → in_production" do
       order = order_fixture()
       assert {:ok, %Order{status: :accepted} = o} = Orders.accept_quote(order)
+      {:ok, _} = Orders.add_pickup(o)
       assert {:ok, %Order{status: :in_production}} = Orders.transition_order(o, :in_production)
+    end
+
+    test "production cannot start without a delivery or pickup" do
+      order = order_fixture()
+      {:ok, order} = Orders.accept_quote(order)
+      assert {:error, :no_deliveries} = Orders.transition_order(order, :in_production)
+
+      {:ok, _} = Orders.add_pickup(order)
+
+      assert {:ok, %Order{status: :in_production}} =
+               Orders.transition_order(order, :in_production)
     end
 
     test "illegal jumps are rejected" do
@@ -129,6 +142,7 @@ defmodule Productionflow.OrdersTest do
       {:ok, order} = Orders.accept_quote(order)
       assert {:ok, _} = Orders.update_order(order, %{reference: "PO-2"})
 
+      {:ok, _} = Orders.add_pickup(order)
       {:ok, order} = Orders.transition_order(order, :in_production)
       assert {:error, :not_editable} = Orders.update_order(order, %{reference: "PO-3"})
     end

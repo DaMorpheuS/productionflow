@@ -27,6 +27,7 @@ defmodule ProductionflowWeb.Orders.OrderLive.Show do
     |> assign(:pending_action, nil)
     |> assign(:totals, Orders.order_totals(order))
     |> assign(:all_done, Orders.all_steps_done?(order.id))
+    |> assign(:has_deliveries, order.deliveries != [])
     |> assign(:address_options, address_options(order))
   end
 
@@ -88,7 +89,9 @@ defmodule ProductionflowWeb.Orders.OrderLive.Show do
             {gettext("Revise")}
           </.button>
           <.button
-            :if={@can_manage and :in_production in Order.next_statuses(@order.status)}
+            :if={
+              @can_manage and :in_production in Order.next_statuses(@order.status) and @has_deliveries
+            }
             variant="primary"
             phx-click="transition"
             phx-value-status="in_production"
@@ -299,16 +302,19 @@ defmodule ProductionflowWeb.Orders.OrderLive.Show do
       </section>
 
       <section class="rounded-xl border border-base-300 bg-base-100 p-6">
-        <h2 class="mb-3 text-base font-semibold">{gettext("Deliveries")}</h2>
+        <div class="mb-3 flex items-center justify-between">
+          <h2 class="text-base font-semibold">{gettext("Deliveries")}</h2>
+          <.button :if={@can_edit} phx-click="add_pickup">{gettext("Add customer pickup")}</.button>
+        </div>
 
         <p :if={@order.deliveries == []} class="text-sm text-base-content/60">
-          {gettext("No delivery addresses yet.")}
+          {gettext("No delivery addresses or pickup yet — add one to start production.")}
         </p>
 
         <div :for={delivery <- @order.deliveries} class="mb-4 rounded-lg border border-base-200 p-4">
           <div class="flex items-start justify-between gap-4">
             <div class="text-sm">
-              <div class="font-medium">{format_address(delivery)}</div>
+              <div class="font-medium">{delivery_label(delivery)}</div>
               <div :if={delivery.planned_date} class="text-base-content/60">
                 {gettext("Planned")}: {delivery.planned_date}
               </div>
@@ -404,8 +410,25 @@ defmodule ProductionflowWeb.Orders.OrderLive.Show do
         {:ok, _order} ->
           {:noreply, reload(socket, gettext("Order updated."))}
 
+        {:error, :no_deliveries} ->
+          {:noreply,
+           put_flash(
+             socket,
+             :error,
+             gettext("Add a delivery address or pickup before starting production.")
+           )}
+
         {:error, _} ->
           {:noreply, put_flash(socket, :error, gettext("That change is not allowed."))}
+      end
+    end)
+  end
+
+  def handle_event("add_pickup", _params, socket) do
+    authorize(socket, fn ->
+      case Orders.add_pickup(socket.assigns.order) do
+        {:ok, _} -> {:noreply, reload(socket, gettext("Pickup added."))}
+        {:error, _} -> {:noreply, put_flash(socket, :error, gettext("Could not add the pickup."))}
       end
     end)
   end
@@ -644,6 +667,9 @@ defmodule ProductionflowWeb.Orders.OrderLive.Show do
     d = line.depends_on |> Enum.map(&Map.get(acc, &1.id, 0)) |> Enum.max() |> Kernel.+(1)
     Map.put(acc, line.id, d)
   end
+
+  defp delivery_label(%{kind: :pickup}), do: gettext("Pickup by the customer")
+  defp delivery_label(delivery), do: format_address(delivery)
 
   defp format_address(%{street: street, postal_code: postal, city: city, country: country}) do
     [street, [postal, city] |> Enum.reject(&blank?/1) |> Enum.join(" "), country]
