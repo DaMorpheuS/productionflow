@@ -120,9 +120,14 @@ defmodule ProductionflowWeb.Orders.OrderLiveTest do
       render_hook(lv, "transition", %{"status" => "confirmed"})
       render_hook(lv, "transition", %{"status" => "in_production"})
 
-      for line <- Orders.get_order!(order.id).lines, step <- line.route_steps do
-        render_hook(lv, "advance_step", %{"id" => step.id, "status" => "in_progress"})
-        render_hook(lv, "advance_step", %{"id" => step.id, "status" => "done"})
+      # Route steps are advanced on each line's own page.
+      for line <- Orders.get_order!(order.id).lines do
+        {:ok, line_lv, _} = live(conn, ~p"/orders/#{order}/lines/#{line}")
+
+        for step <- line.route_steps do
+          render_hook(line_lv, "advance_step", %{"id" => step.id, "status" => "in_progress"})
+          render_hook(line_lv, "advance_step", %{"id" => step.id, "status" => "done"})
+        end
       end
 
       before = Inventory.get_material!(material.id).current_stock
@@ -169,12 +174,11 @@ defmodule ProductionflowWeb.Orders.OrderLiveTest do
       line = Orders.get_order!(order.id).lines |> hd()
       assert line.price_source == :manual
 
-      lv
-      |> form("#add-step-#{line.id}", %{
-        line_id: line.id,
-        machine_id: machine.id,
-        machine_quantity: "100"
-      })
+      # The line opens on its own page where its route is built.
+      {:ok, line_lv, _} = live(conn, ~p"/orders/#{order}/lines/#{line}")
+
+      line_lv
+      |> form("#add-step-form", %{machine_id: machine.id, machine_quantity: "100"})
       |> render_submit()
 
       assert length(Orders.get_line!(line.id).route_steps) == 1
@@ -211,6 +215,33 @@ defmodule ProductionflowWeb.Orders.OrderLiveTest do
 
       assert length(qtys) == 2
       assert Enum.all?(qtys, &Decimal.equal?(&1, Decimal.new("500")))
+    end
+  end
+
+  describe "Line page" do
+    setup :register_and_log_in_user
+
+    @tag permissions: ["orders.manage"]
+    test "a line is listed as a link, opens on its own page, and can be removed", %{conn: conn} do
+      {template, _material} = priced_template()
+      order = order_fixture()
+
+      {:ok, lv, _html} = live(conn, ~p"/orders/#{order}")
+
+      lv
+      |> form("#add-line-form", %{product_template_id: template.id, quantity: "100"})
+      |> render_submit()
+
+      line = Orders.get_order!(order.id).lines |> hd()
+      assert has_element?(lv, "a[href='/orders/#{order.id}/lines/#{line.id}']")
+
+      {:ok, line_lv, html} = live(conn, ~p"/orders/#{order}/lines/#{line}")
+      assert html =~ "Route"
+      assert html =~ "A5 flyer"
+
+      line_lv |> element("button", "Remove line") |> render_click()
+      assert_redirect(line_lv, ~p"/orders/#{order}")
+      assert Orders.get_order!(order.id).lines == []
     end
   end
 end

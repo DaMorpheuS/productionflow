@@ -235,6 +235,7 @@ defmodule ProductionflowWeb.Router do
       ] do
       live "/", OrderLive.Index, :index
       live "/:id", OrderLive.Show, :show
+      live "/:id/lines/:line_id", OrderLineLive.Show, :show
     end
   end
 
