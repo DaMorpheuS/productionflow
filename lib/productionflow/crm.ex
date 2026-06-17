@@ -47,6 +47,20 @@ defmodule Productionflow.CRM do
   defp filter_type(query, :prospect), do: where(query, [r], r.is_prospect)
   defp filter_type(query, _), do: query
 
+  @doc "Counts active relations by flag, as `%{customer:, supplier:, prospect:}`."
+  def count_by_type do
+    Repo.one(
+      from(r in Relation,
+        where: is_nil(r.archived_at),
+        select: %{
+          customer: filter(count(r.id), r.is_customer),
+          supplier: filter(count(r.id), r.is_supplier),
+          prospect: filter(count(r.id), r.is_prospect)
+        }
+      )
+    )
+  end
+
   @doc "Gets a relation with addresses, contacts (with their address), and notes (newest first)."
   def get_relation!(id) do
     notes_query = from(n in Note, order_by: [desc: n.inserted_at, desc: n.id], preload: :user)

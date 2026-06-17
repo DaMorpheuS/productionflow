@@ -47,6 +47,11 @@ defmodule Productionflow.Production do
     where(query, [m], ilike(m.name, ^like))
   end
 
+  @doc "Counts non-archived machines."
+  def count_machines do
+    Repo.aggregate(from(m in Machine, where: is_nil(m.archived_at)), :count, :id)
+  end
+
   @doc "Gets a machine with operators and time modifiers preloaded."
   def get_machine!(id) do
     Machine

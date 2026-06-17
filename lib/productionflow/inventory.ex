@@ -69,6 +69,40 @@ defmodule Productionflow.Inventory do
 
   defp filter_low_stock(query, _), do: query
 
+  ## Dashboard aggregates
+
+  @doc "Non-archived materials at or below their minimum, or in negative stock."
+  def list_low_stock do
+    low_stock_query()
+    |> order_by(asc: :name)
+    |> preload([:category, :supplier])
+    |> Repo.all()
+  end
+
+  @doc "Counts the materials returned by `list_low_stock/0`."
+  def count_low_stock do
+    Repo.aggregate(low_stock_query(), :count, :id)
+  end
+
+  defp low_stock_query do
+    from(m in Material,
+      where:
+        is_nil(m.archived_at) and
+          ((not is_nil(m.minimum_stock) and m.current_stock <= m.minimum_stock) or
+             m.current_stock < 0)
+    )
+  end
+
+  @doc "Total value of stock on hand: Σ current_stock × cost_price over active materials."
+  def total_stock_value do
+    Repo.one(
+      from(m in Material,
+        where: is_nil(m.archived_at),
+        select: coalesce(sum(m.current_stock * m.cost_price), 0)
+      )
+    )
+  end
+
   @doc "Gets a material with category, supplier, type+fields and movements (newest first) preloaded."
   def get_material!(id) do
     movements =

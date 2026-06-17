@@ -213,6 +213,30 @@ defmodule Productionflow.PlanningTest do
     end
   end
 
+  describe "dashboard counts" do
+    test "count_unscheduled counts active backlog steps" do
+      machine = machine_fixture()
+      s1 = route_step_fixture(machine)
+      _s2 = route_step_fixture(machine)
+
+      assert Planning.count_unscheduled() == 2
+
+      {:ok, _} = Planning.schedule_step(s1, machine.id)
+      assert Planning.count_unscheduled() == 1
+    end
+
+    test "count_late counts scheduled steps finishing after the due date", %{monday: monday} do
+      machine = machine_fixture()
+      late = route_step_fixture(machine, machine_quantity: 60, due_date: Date.add(monday, -1))
+      ontime = route_step_fixture(machine, machine_quantity: 60, due_date: Date.add(monday, 5))
+
+      {:ok, _} = Planning.schedule_step(late, machine.id)
+      {:ok, _} = Planning.schedule_step(ontime, machine.id)
+
+      assert Planning.count_late() == 1
+    end
+  end
+
   describe "board_data/0" do
     test "returns a column per machine with its scheduled steps and the backlog" do
       machine = machine_fixture()

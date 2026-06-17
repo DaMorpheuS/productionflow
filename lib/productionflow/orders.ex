@@ -111,6 +111,41 @@ defmodule Productionflow.Orders do
   defp filter_archived(query, true), do: query
   defp filter_archived(query, _), do: where(query, [o], is_nil(o.archived_at))
 
+  ## Dashboard aggregates
+
+  @doc "Counts non-archived documents grouped by status, as a `%{status => count}` map."
+  def count_by_status do
+    from(o in Order,
+      where: is_nil(o.archived_at),
+      group_by: o.status,
+      select: {o.status, count(o.id)}
+    )
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  @doc "Counts orders whose due date has passed while still being produced."
+  def count_overdue(today \\ Date.utc_today()) do
+    from(o in Order,
+      where:
+        is_nil(o.archived_at) and o.status in [:accepted, :in_production] and o.due_date < ^today,
+      select: count(o.id)
+    )
+    |> Repo.one()
+  end
+
+  @doc "The most recently touched non-archived documents, customer preloaded."
+  def recent_activity(limit \\ 8) do
+    from(o in Order,
+      join: r in assoc(o, :relation),
+      where: is_nil(o.archived_at),
+      order_by: [desc: o.updated_at],
+      limit: ^limit,
+      preload: [relation: r]
+    )
+    |> Repo.all()
+  end
+
   @doc "Gets an order with its customer, lines, route steps, materials and dependencies preloaded."
   def get_order!(id) do
     Order

@@ -222,6 +222,38 @@ defmodule Productionflow.Planning do
     |> Repo.all()
   end
 
+  @doc "Counts active route steps that are not yet on the board (the backlog)."
+  def count_unscheduled do
+    from(s in OrderRouteStep,
+      join: l in OrderLine,
+      on: l.id == s.order_line_id,
+      join: o in Order,
+      on: o.id == l.order_id,
+      left_join: ss in ScheduledStep,
+      on: ss.order_route_step_id == s.id,
+      where: o.status in @active_order_statuses and s.status != :done and is_nil(ss.id),
+      select: count(s.id)
+    )
+    |> Repo.one()
+  end
+
+  @doc "Counts active scheduled steps planned to finish after their order's due date."
+  def count_late do
+    from(ss in ScheduledStep,
+      join: s in OrderRouteStep,
+      on: s.id == ss.order_route_step_id,
+      join: l in OrderLine,
+      on: l.id == s.order_line_id,
+      join: o in Order,
+      on: o.id == l.order_id,
+      where:
+        o.status in @active_order_statuses and s.status != :done and not is_nil(ss.ends_at) and
+          not is_nil(o.due_date) and fragment("?::date", ss.ends_at) > o.due_date,
+      select: count(ss.id)
+    )
+    |> Repo.one()
+  end
+
   @doc """
   Everything the board needs: a column per active machine with its scheduled
   steps, the unscheduled backlog, and the set of scheduled-step ids that sit out
