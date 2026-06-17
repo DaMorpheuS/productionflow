@@ -47,6 +47,7 @@ defmodule ProductionflowWeb.Router do
     live_session :require_authenticated_user,
       on_mount: [{ProductionflowWeb.UserAuth, :require_authenticated}] do
       live "/", DashboardLive, :index
+      live "/search", SearchLive, :index
       live "/users/settings", UserLive.Settings, :edit
       live "/users/settings/confirm-email/:token", UserLive.Settings, :confirm_email
     end

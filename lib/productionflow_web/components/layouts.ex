@@ -46,6 +46,24 @@ defmodule ProductionflowWeb.Layouts do
         <header class="flex items-center justify-between gap-4 border-b border-base-300 bg-base-100 px-4 py-3 sm:px-6 lg:px-8">
           <h1 class="text-lg font-semibold truncate">{@page_title || gettext("Productionflow")}</h1>
           <div class="flex items-center gap-3">
+            <form
+              :if={@current_scope}
+              id="global-search"
+              action={~p"/search"}
+              method="get"
+              class="hidden sm:block"
+            >
+              <label class="input input-sm">
+                <.icon name="hero-magnifying-glass" class="size-4 opacity-60" />
+                <input
+                  type="search"
+                  name="q"
+                  placeholder={gettext("Search…")}
+                  class="grow"
+                  aria-label={gettext("Search")}
+                />
+              </label>
+            </form>
             <.theme_toggle />
             <div :if={@current_scope} class="dropdown dropdown-end">
               <div tabindex="0" role="button" class="btn btn-ghost btn-sm">
