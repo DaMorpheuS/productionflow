@@ -38,7 +38,7 @@ milestones**. Each milestone is fully tested and ends in its own commit.
 | M6 | Orders — orders, lines, per-line production routes, lifecycle, stock consumption | ✅ Done |
 | M7 | Quotes — a quote is an order in a pre-acceptance stage; send by email, customer accepts/declines, decline/revise/archive | ✅ Done |
 | M8 | Planning — scheduling board: order route steps onto machines over time, per-machine queues, drag-drop, due dates | ✅ Done |
-| M9 | Hardening & dashboard — overview, search, demo data | ⬜ Planned |
+| M9 | Hardening & dashboard — overview dashboard, global search, richer demo data | ✅ Done |
 
 ---
 
@@ -224,6 +224,20 @@ milestones**. Each milestone is fully tested and ends in its own commit.
 - The board packs forward from a configurable **Schedule from** date (never
   earlier than today). Viewing needs `planning.view`; dragging and settings need
   `planning.manage`.
+
+### M9 — Hardening: dashboard & search
+
+- The home page is now an **overview dashboard**. **Needs attention** surfaces
+  overdue orders, low/negative stock, and unscheduled or late production steps;
+  **KPIs** show open quotes, active orders, low-stock count, stock value,
+  machines and customers; **Recent activity** lists the latest documents. Every
+  widget is permission-gated and links through to the relevant list, so each role
+  sees only what it may.
+- A **global search** box in the header searches across **orders, relations,
+  materials and products** at once, grouped by type and gated per permission.
+- **Demo seeds** were enriched — orders spread across the status lifecycle
+  (including an overdue one), extra relations of each type, and some low-stock
+  materials — so the dashboard and lists are populated out of the box.
 
 ---
 
