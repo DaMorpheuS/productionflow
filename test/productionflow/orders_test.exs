@@ -66,6 +66,17 @@ defmodule Productionflow.OrdersTest do
       assert o.status == :accepted
       assert o.number == "ORD-#{year}-0001"
     end
+
+    test "order numbers keep incrementing across accepts" do
+      year = Date.utc_today().year
+      {:ok, o1} = Orders.accept_quote(order_fixture())
+      {:ok, o2} = Orders.accept_quote(order_fixture())
+      {:ok, o3} = Orders.accept_quote(order_fixture())
+
+      assert o1.number == "ORD-#{year}-0001"
+      assert o2.number == "ORD-#{year}-0002"
+      assert o3.number == "ORD-#{year}-0003"
+    end
   end
 
   describe "create_order/1" do

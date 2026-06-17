@@ -179,26 +179,20 @@ defmodule Productionflow.Orders do
     |> Enum.join("-")
   end
 
-  # Locks (or creates then locks) the scope's counter row and returns the next
-  # value. Must run inside the order-creation transaction.
+  # Atomically inserts-or-increments the scope's counter row and returns the next
+  # value. A single `INSERT ... ON CONFLICT (scope) DO UPDATE SET value = value + 1
+  # RETURNING value` locks exactly one row in one statement, so concurrent order
+  # creations can't form a lock cycle (the previous create-then-`FOR UPDATE`
+  # sequence could deadlock across the quote/order counter scopes).
   defp next_counter_value(scope) do
-    counter = lock_counter(scope) || create_and_lock_counter(scope)
+    {:ok, counter} =
+      Repo.insert(%NumberCounter{scope: scope, value: 1},
+        on_conflict: [inc: [value: 1]],
+        conflict_target: :scope,
+        returning: [:value]
+      )
 
-    counter
-    |> Ecto.Changeset.change(value: counter.value + 1)
-    |> Repo.update!()
-    |> Map.fetch!(:value)
-  end
-
-  defp lock_counter(scope) do
-    Repo.one(from c in NumberCounter, where: c.scope == ^scope, lock: "FOR UPDATE")
-  end
-
-  defp create_and_lock_counter(scope) do
-    %NumberCounter{scope: scope, value: 0}
-    |> Repo.insert!(on_conflict: :nothing, conflict_target: :scope)
-
-    lock_counter(scope)
+    counter.value
   end
 
   ## Lines

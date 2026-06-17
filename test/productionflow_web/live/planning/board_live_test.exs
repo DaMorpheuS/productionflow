@@ -1,6 +1,6 @@
 defmodule ProductionflowWeb.Planning.BoardLiveTest do
-  # Not async: see the note in Productionflow.PlanningTest — order creation locks
-  # shared counter rows that can deadlock under concurrent suites.
+  # Not async: see the note in Productionflow.PlanningTest — order-creating suites
+  # contend on the shared counter rows under the sandbox and deadlock.
   use ProductionflowWeb.ConnCase, async: false
 
   import Phoenix.LiveViewTest

@@ -1,7 +1,9 @@
 defmodule Productionflow.PlanningTest do
-  # Not async: these tests create many orders, which lock the shared
-  # order-number counter rows; running them concurrently with the other
-  # order-creating suites can deadlock on those locks.
+  # Not async: these tests create many orders. In the Ecto sandbox each async
+  # test holds its transaction (and therefore the shared order-number counter
+  # row locks) for the whole test, so running order-creating suites concurrently
+  # contends on those rows and deadlocks. Production is unaffected — there each
+  # create/accept is a short, single-counter transaction that commits at once.
   use Productionflow.DataCase, async: false
 
   alias Productionflow.Planning
