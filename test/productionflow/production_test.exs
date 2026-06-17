@@ -48,6 +48,60 @@ defmodule Productionflow.ProductionTest do
       machine = Production.get_machine!(machine.id)
       assert Enum.map(machine.operators, & &1.id) |> Enum.sort() == Enum.sort([u1.id, u2.id])
     end
+
+    test "defaults working hours to a Mon–Fri 08:00–16:30 day" do
+      {:ok, machine} =
+        Production.create_machine(%{
+          name: "Laser",
+          output_unit: "m",
+          units_per_hour: Decimal.new(120)
+        })
+
+      assert machine.working_day_start == ~T[08:00:00]
+      assert machine.working_day_end == ~T[16:30:00]
+      assert machine.working_days == [1, 2, 3, 4, 5]
+    end
+
+    test "casts working-day strings and rejects the blank sentinel" do
+      {:ok, machine} =
+        Production.create_machine(%{
+          "name" => "Press",
+          "output_unit" => "pieces",
+          "units_per_hour" => "100",
+          "working_day_start" => "06:00",
+          "working_day_end" => "22:00",
+          "working_days" => ["", "1", "3", "5"]
+        })
+
+      assert machine.working_day_start == ~T[06:00:00]
+      assert machine.working_day_end == ~T[22:00:00]
+      assert machine.working_days == [1, 3, 5]
+    end
+
+    test "rejects an end before the start, no working days, or an unknown day" do
+      assert {:error, cs} =
+               Production.create_machine(%{
+                 name: "Press",
+                 output_unit: "pieces",
+                 units_per_hour: Decimal.new(100),
+                 working_day_start: ~T[16:00:00],
+                 working_day_end: ~T[08:00:00],
+                 working_days: []
+               })
+
+      assert errors_on(cs)[:working_day_end]
+      assert errors_on(cs)[:working_days]
+
+      assert {:error, cs2} =
+               Production.create_machine(%{
+                 name: "Press",
+                 output_unit: "pieces",
+                 units_per_hour: Decimal.new(100),
+                 working_days: [1, 9]
+               })
+
+      assert errors_on(cs2)[:working_days]
+    end
   end
 
   describe "update_machine/3" do

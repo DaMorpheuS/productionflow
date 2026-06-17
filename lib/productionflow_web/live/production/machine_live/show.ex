@@ -61,6 +61,8 @@ defmodule ProductionflowWeb.Production.MachineLive.Show do
           <.detail label={gettext("Units / hour")} value={Decimal.to_string(@machine.units_per_hour)} />
           <.detail label={gettext("Setup minutes")} value={Decimal.to_string(@machine.setup_minutes)} />
           <.detail label={gettext("Power draw")} value={"#{Decimal.to_string(@machine.power_kw)} kW"} />
+          <.detail label={gettext("Working hours")} value={working_hours(@machine)} />
+          <.detail label={gettext("Working days")} value={working_days(@machine)} />
         </dl>
 
         <p class="mt-4 text-xs font-semibold uppercase tracking-wide text-base-content/50">
@@ -270,6 +272,30 @@ defmodule ProductionflowWeb.Production.MachineLive.Show do
   end
 
   defp parse_quantity(_), do: nil
+
+  defp working_hours(machine) do
+    "#{format_time(machine.working_day_start)}–#{format_time(machine.working_day_end)}"
+  end
+
+  defp format_time(%Time{} = time), do: Calendar.strftime(time, "%H:%M")
+
+  @weekday_labels %{
+    1 => "Mon",
+    2 => "Tue",
+    3 => "Wed",
+    4 => "Thu",
+    5 => "Fri",
+    6 => "Sat",
+    7 => "Sun"
+  }
+
+  defp working_days(%{working_days: []}), do: gettext("None")
+
+  defp working_days(%{working_days: days}) do
+    days
+    |> Enum.sort()
+    |> Enum.map_join(", ", &Map.fetch!(@weekday_labels, &1))
+  end
 
   defp kind_options, do: Enum.map(TimeModifier.kinds(), &{Phoenix.Naming.humanize(&1), &1})
 

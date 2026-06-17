@@ -41,6 +41,37 @@ defmodule ProductionflowWeb.Production.MachineLive.Form do
         </fieldset>
 
         <fieldset class="mt-4">
+          <legend class="text-sm font-semibold">{gettext("Working hours")}</legend>
+          <p class="text-xs text-base-content/60">
+            {gettext("Used by the planning board to schedule this machine's queue over time.")}
+          </p>
+          <div class="mt-2 grid gap-4 sm:grid-cols-2">
+            <.input
+              field={@form[:working_day_start]}
+              type="time"
+              label={gettext("Day starts at")}
+            />
+            <.input field={@form[:working_day_end]} type="time" label={gettext("Day ends at")} />
+          </div>
+          <div class="mt-3">
+            <span class="text-sm">{gettext("Working days")}</span>
+            <input type="hidden" name="machine[working_days][]" value="" />
+            <div class="mt-1 flex flex-wrap gap-3">
+              <label :for={{label, day} <- weekday_options()} class="flex items-center gap-1 text-sm">
+                <input
+                  type="checkbox"
+                  class="checkbox checkbox-sm"
+                  name="machine[working_days][]"
+                  value={day}
+                  checked={day in @selected_working_days}
+                />
+                {label}
+              </label>
+            </div>
+          </div>
+        </fieldset>
+
+        <fieldset class="mt-4">
           <legend class="text-sm font-semibold">{gettext("Cost basis")}</legend>
           <div class="mt-2 grid gap-4 sm:grid-cols-2">
             <.input
@@ -155,6 +186,7 @@ defmodule ProductionflowWeb.Production.MachineLive.Form do
     |> assign(:page_title, gettext("New machine"))
     |> assign(:machine, machine)
     |> assign(:selected_operator_ids, MapSet.new())
+    |> assign(:selected_working_days, machine.working_days)
     |> assign_form(Production.change_machine(machine))
     |> recompute_preview(machine)
   end
@@ -167,6 +199,7 @@ defmodule ProductionflowWeb.Production.MachineLive.Form do
     |> assign(:page_title, gettext("Edit machine"))
     |> assign(:machine, machine)
     |> assign(:selected_operator_ids, operator_ids)
+    |> assign(:selected_working_days, machine.working_days)
     |> assign_form(Production.change_machine(machine))
     |> recompute_preview(machine)
   end
@@ -181,6 +214,7 @@ defmodule ProductionflowWeb.Production.MachineLive.Form do
      socket
      |> assign_form(Map.put(changeset, :action, :validate))
      |> assign(:selected_operator_ids, MapSet.new(Enum.reject(operator_ids, &(&1 == ""))))
+     |> assign(:selected_working_days, working_days_from(params))
      |> recompute_preview(preview)}
   end
 
@@ -234,4 +268,23 @@ defmodule ProductionflowWeb.Production.MachineLive.Form do
 
   defp cancel_path(%Machine{id: nil}), do: ~p"/production/machines"
   defp cancel_path(machine), do: ~p"/production/machines/#{machine}"
+
+  defp working_days_from(params) do
+    params
+    |> Map.get("working_days", [])
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.map(&String.to_integer/1)
+  end
+
+  defp weekday_options do
+    [
+      {gettext("Mon"), 1},
+      {gettext("Tue"), 2},
+      {gettext("Wed"), 3},
+      {gettext("Thu"), 4},
+      {gettext("Fri"), 5},
+      {gettext("Sat"), 6},
+      {gettext("Sun"), 7}
+    ]
+  end
 end
