@@ -1,5 +1,8 @@
 defmodule Productionflow.PlanningTest do
-  use Productionflow.DataCase, async: true
+  # Not async: these tests create many orders, which lock the shared
+  # order-number counter rows; running them concurrently with the other
+  # order-creating suites can deadlock on those locks.
+  use Productionflow.DataCase, async: false
 
   alias Productionflow.Planning
   alias Productionflow.Planning.ScheduledStep

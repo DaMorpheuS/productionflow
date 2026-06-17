@@ -140,6 +140,13 @@ defmodule ProductionflowWeb.Layouts do
         >
           {gettext("Orders")}
         </.nav_link>
+        <.nav_link
+          :if={Scope.can?(@current_scope, "planning.view")}
+          navigate={~p"/planning"}
+          icon="hero-calendar-days"
+        >
+          {gettext("Planning")}
+        </.nav_link>
 
         <div
           :if={Scope.admin?(@current_scope)}

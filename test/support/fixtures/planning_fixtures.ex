@@ -37,4 +37,13 @@ defmodule Productionflow.PlanningFixtures do
 
     Orders.get_line!(line.id).route_steps |> List.last()
   end
+
+  @doc "Moves the order owning `step` into production (via a pickup) and reloads it."
+  def in_production!(step) do
+    line = Orders.get_line!(step.order_line_id)
+    order = Orders.get_order!(line.order_id)
+    {:ok, _} = Orders.add_pickup(order)
+    {:ok, _} = Orders.transition_order(order, :in_production)
+    Orders.get_line_route_step!(step.id)
+  end
 end

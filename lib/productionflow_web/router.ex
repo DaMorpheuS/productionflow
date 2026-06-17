@@ -239,6 +239,28 @@ defmodule ProductionflowWeb.Router do
     end
   end
 
+  # Planning board. Viewing requires planning.view; dragging/sequencing and the
+  # settings page require planning.manage. Manage session first so /settings wins.
+  scope "/planning", ProductionflowWeb.Planning, as: :planning do
+    pipe_through [:browser, :require_authenticated_user]
+
+    live_session :planning_manage,
+      on_mount: [
+        {ProductionflowWeb.UserAuth, :require_authenticated},
+        {ProductionflowWeb.UserAuth, {:require_permission, "planning.manage"}}
+      ] do
+      live "/settings", SettingsLive, :edit
+    end
+
+    live_session :planning,
+      on_mount: [
+        {ProductionflowWeb.UserAuth, :require_authenticated},
+        {ProductionflowWeb.UserAuth, {:require_permission, "planning.view"}}
+      ] do
+      live "/", BoardLive, :index
+    end
+  end
+
   scope "/quotes", ProductionflowWeb.Orders, as: :quotes do
     pipe_through [:browser, :require_authenticated_user]
 

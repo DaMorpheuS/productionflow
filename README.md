@@ -37,7 +37,7 @@ milestones**. Each milestone is fully tested and ends in its own commit.
 | M5b | Pricing — customer price (margin) + price lists + quote view | ✅ Done |
 | M6 | Orders — orders, lines, per-line production routes, lifecycle, stock consumption | ✅ Done |
 | M7 | Quotes — a quote is an order in a pre-acceptance stage; send by email, customer accepts/declines, decline/revise/archive | ✅ Done |
-| M8 | Planning — scheduling board: order route steps onto machines over time, per-machine queues, due dates | ⬜ Planned |
+| M8 | Planning — scheduling board: order route steps onto machines over time, per-machine queues, drag-drop, due dates | ✅ Done |
 | M9 | Hardening & dashboard — overview, search, demo data | ⬜ Planned |
 
 ---
@@ -205,6 +205,25 @@ milestones**. Each milestone is fully tested and ends in its own commit.
   **public link** (no login) where they review the quote and **accept** (it
   becomes an order) or **decline** (with a reason). The link is a hashed,
   expiring token and is consumed once a decision is made.
+
+### M8 — Planning
+
+- A **scheduling board** that places each order's **route steps** onto the
+  machines that run them, over time. Columns are machines plus an
+  **Unscheduled** backlog; cards are route steps from **accepted** and
+  **in-production** orders.
+- **Drag a card** from the backlog onto a machine to schedule it, reorder within
+  a machine to sequence the queue, or drag it back to unschedule. A step only
+  fits **its own** machine. Each machine packs its queue **back-to-back** across
+  its **working hours** (a daily window + working weekdays, configured per
+  machine), rolling onto the next working day when a step overflows.
+- Cards show the computed **start time** and flag work planned to finish **after
+  its due date** (`late`) or scheduled **out of route order** (`order`). From an
+  in-production order's card you can **Start** / mark **Done**, which advances the
+  underlying route step; done steps drop off the board.
+- The board packs forward from a configurable **Schedule from** date (never
+  earlier than today). Viewing needs `planning.view`; dragging and settings need
+  `planning.manage`.
 
 ---
 

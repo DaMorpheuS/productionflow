@@ -48,6 +48,11 @@ defmodule Productionflow.Accounts.Permissions do
      [
        {"orders.view", "View orders"},
        {"orders.manage", "Manage orders"}
+     ]},
+    {"Planning",
+     [
+       {"planning.view", "View the planning board"},
+       {"planning.manage", "Manage the planning board"}
      ]}
   ]
 

@@ -25,6 +25,7 @@ alias Productionflow.Pricing
 alias Productionflow.Pricing.PriceListItem
 alias Productionflow.CRM
 alias Productionflow.Orders
+alias Productionflow.Planning
 
 # Idempotent: an Administrator role holding every permission, and an admin user
 # assigned to it. Re-running keeps both in sync.
@@ -444,7 +445,9 @@ press =
           residual_value: "5000",
           lifetime_years: "7",
           yearly_maintenance_cost: "6000",
-          productive_hours_per_year: "1500"
+          productive_hours_per_year: "1500",
+          working_day_start: "06:00",
+          working_day_end: "22:00"
         })
 
       machine
@@ -534,4 +537,16 @@ unless Repo.exists?(
     "Orders seed: created quote #{order.quote_number}, accepted as order #{order.number} " <>
       "for #{demo_customer.name}."
   )
+
+  # Place the accepted order's print step onto the board so Planning has data.
+  step =
+    order.id
+    |> Orders.get_order!()
+    |> Map.fetch!(:lines)
+    |> List.first()
+    |> Map.fetch!(:route_steps)
+    |> List.first()
+
+  {:ok, _} = Planning.schedule_step(step, step.machine_id)
+  IO.puts("Planning seed: scheduled the demo order's print step on #{step.machine_name}.")
 end
