@@ -550,3 +550,108 @@ unless Repo.exists?(
   {:ok, _} = Planning.schedule_step(step, step.machine_id)
   IO.puts("Planning seed: scheduled the demo order's print step on #{step.machine_name}.")
 end
+
+# Richer demo data so the dashboard and lists look populated: a couple of
+# low-stock materials, extra relations across types, and flyer orders spread
+# over the status lifecycle (incl. an overdue one). All idempotent.
+
+for {sku, name, unit, cost, min, opening} <- [
+      {"DEMO-LOW-FILM", "Lamination film (gloss)", "m", "1.20", "500", "120"},
+      {"DEMO-LOW-GLUE", "Binding glue", "kg", "8.50", "25", "4"}
+    ] do
+  unless Repo.get_by(Material, sku: sku) do
+    {:ok, _} =
+      Inventory.create_material(%{
+        name: name,
+        unit: unit,
+        sku: sku,
+        cost_price: cost,
+        minimum_stock: min,
+        opening_stock: opening
+      })
+  end
+end
+
+IO.puts("Inventory seed: ensured demo low-stock materials.")
+
+for attrs <- [
+      %{name: "Studio Noord", is_customer: true},
+      %{name: "Bakkerij Janssen", is_customer: true},
+      %{name: "Inkt & Papier BV", is_supplier: true},
+      %{name: "Festival Collectief", is_prospect: true}
+    ] do
+  unless Repo.get_by(CRM.Relation, name: attrs.name) do
+    {:ok, _} = CRM.create_relation(attrs)
+  end
+end
+
+studio = Repo.get_by!(CRM.Relation, name: "Studio Noord")
+bakkerij = Repo.get_by!(CRM.Relation, name: "Bakkerij Janssen")
+admin_user = Repo.get_by!(User, email: admin_email)
+
+first_route_step = fn order ->
+  order.id
+  |> Orders.get_order!()
+  |> Map.fetch!(:lines)
+  |> List.first()
+  |> Map.fetch!(:route_steps)
+  |> List.first()
+end
+
+# Builds a flyer order for `customer` and drives it to `target` status, scheduling
+# its step where that makes sense. Statuses follow draft → sent → accepted →
+# in_production → completed.
+seed_flyer_order = fn customer, reference, qty, target, due ->
+  attrs = %{"relation_id" => customer.id, "reference" => reference}
+  attrs = if due, do: Map.put(attrs, "due_date", Date.to_iso8601(due)), else: attrs
+
+  {:ok, order} = Orders.create_order(attrs)
+  {:ok, _} = Orders.add_line_from_template(order, flyer.id, qty)
+
+  case target do
+    :draft ->
+      order
+
+    :sent ->
+      {:ok, sent} = Orders.transition_order(order, :sent)
+      sent
+
+    _ ->
+      {:ok, _} = Orders.add_pickup(order)
+      {:ok, accepted} = Orders.accept_quote(order)
+
+      case target do
+        :accepted ->
+          accepted
+
+        :in_production ->
+          {:ok, in_prod} = Orders.transition_order(accepted, :in_production)
+          step = first_route_step.(in_prod)
+          {:ok, _} = Planning.schedule_step(step, step.machine_id)
+          in_prod
+
+        :completed ->
+          {:ok, in_prod} = Orders.transition_order(accepted, :in_production)
+          step = first_route_step.(in_prod)
+          {:ok, _} = Orders.advance_step(step, :in_progress)
+          {:ok, _} = Orders.advance_step(Orders.get_line_route_step!(step.id), :done)
+          {:ok, done} = Orders.complete_order(Orders.get_order!(in_prod.id), admin_user)
+          done
+      end
+  end
+end
+
+unless Repo.exists?(from(o in Productionflow.Orders.Order, where: o.relation_id == ^studio.id)) do
+  seed_flyer_order.(studio, "WEB-001", "500", :draft, nil)
+  seed_flyer_order.(studio, "EVENT-007", "2000", :completed, Date.add(Date.utc_today(), -3))
+  IO.puts("Orders seed: created a draft quote + a completed order for #{studio.name}.")
+end
+
+unless Repo.exists?(from(o in Productionflow.Orders.Order, where: o.relation_id == ^bakkerij.id)) do
+  seed_flyer_order.(bakkerij, "MENU-Q", "1500", :sent, Date.add(Date.utc_today(), 10))
+  seed_flyer_order.(bakkerij, "RUSH", "3000", :in_production, Date.add(Date.utc_today(), -1))
+
+  IO.puts(
+    "Orders seed: created a sent quote + an overdue in-production order for #{bakkerij.name}."
+  )
+end
